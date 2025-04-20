@@ -1,41 +1,45 @@
 use super::Okx;
-use crate::{
-    instrument::{KeyedInstrument, MarketInstrumentData},
-    subscription::Subscription,
-    Identifier,
-};
-use barter_integration::model::instrument::{
-    kind::{InstrumentKind, OptionKind},
-    Instrument,
+use crate::{Identifier, instrument::MarketInstrumentData, subscription::Subscription};
+use barter_instrument::{
+    Keyed,
+    instrument::{
+        kind::option::OptionKind,
+        market_data::{MarketDataInstrument, kind::MarketDataInstrumentKind::*},
+    },
 };
 use chrono::{
-    format::{DelayedFormat, StrftimeItems},
     DateTime, Utc,
+    format::{DelayedFormat, StrftimeItems},
 };
 use serde::{Deserialize, Serialize};
+use smol_str::{SmolStr, StrExt, format_smolstr};
 
 /// Type that defines how to translate a Barter [`Subscription`] into a
 /// [`Okx`] market that can be subscribed to.
 ///
 /// See docs: <https://www.okx.com/docs-v5/en/#websocket-api-public-channel>
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
-pub struct OkxMarket(pub String);
+pub struct OkxMarket(pub SmolStr);
 
-impl<Kind> Identifier<OkxMarket> for Subscription<Okx, Instrument, Kind> {
+impl<Kind> Identifier<OkxMarket> for Subscription<Okx, MarketDataInstrument, Kind> {
     fn id(&self) -> OkxMarket {
         okx_market(&self.instrument)
     }
 }
 
-impl<Kind> Identifier<OkxMarket> for Subscription<Okx, KeyedInstrument, Kind> {
+impl<InstrumentKey, Kind> Identifier<OkxMarket>
+    for Subscription<Okx, Keyed<InstrumentKey, MarketDataInstrument>, Kind>
+{
     fn id(&self) -> OkxMarket {
-        okx_market(&self.instrument.data)
+        okx_market(&self.instrument.value)
     }
 }
 
-impl<Kind> Identifier<OkxMarket> for Subscription<Okx, MarketInstrumentData, Kind> {
+impl<InstrumentKey, Kind> Identifier<OkxMarket>
+    for Subscription<Okx, MarketInstrumentData<InstrumentKey>, Kind>
+{
     fn id(&self) -> OkxMarket {
-        OkxMarket(self.instrument.name_exchange.clone())
+        OkxMarket(self.instrument.name_exchange.name().clone())
     }
 }
 
@@ -45,24 +49,24 @@ impl AsRef<str> for OkxMarket {
     }
 }
 
-fn okx_market(instrument: &Instrument) -> OkxMarket {
-    use InstrumentKind::*;
-    let Instrument { base, quote, kind } = instrument;
+fn okx_market(instrument: &MarketDataInstrument) -> OkxMarket {
+    let MarketDataInstrument { base, quote, kind } = instrument;
 
     OkxMarket(match kind {
-        Spot => format!("{base}-{quote}").to_uppercase(),
-        Future(future) => format!("{base}-{quote}-{}", format_expiry(future.expiry)).to_uppercase(),
-        Perpetual => format!("{base}-{quote}-SWAP").to_uppercase(),
-        Option(option) => format!(
+        Spot => format_smolstr!("{base}-{quote}").to_uppercase_smolstr(),
+        Future(contract) => format_smolstr!("{base}-{quote}-{}", format_expiry(contract.expiry))
+            .to_uppercase_smolstr(),
+        Perpetual => format_smolstr!("{base}-{quote}-SWAP").to_uppercase_smolstr(),
+        Option(contract) => format_smolstr!(
             "{base}-{quote}-{}-{}-{}",
-            format_expiry(option.expiry),
-            option.strike,
-            match option.kind {
+            format_expiry(contract.expiry),
+            contract.strike,
+            match contract.kind {
                 OptionKind::Call => "C",
                 OptionKind::Put => "P",
             },
         )
-        .to_uppercase(),
+        .to_uppercase_smolstr(),
     })
 }
 

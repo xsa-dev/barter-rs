@@ -1,18 +1,17 @@
-use std::borrow::Cow;
-
+use barter_instrument::asset::name::AssetNameInternal;
 use barter_integration::{
     error::SocketError,
-    model::instrument::symbol::Symbol,
     protocol::http::{
-        private::{encoder::HexEncoder, RequestSigner, Signer},
-        rest::{client::RestClient, RestRequest},
         HttpParser,
+        private::{RequestSigner, Signer, encoder::HexEncoder},
+        rest::{RestRequest, client::RestClient},
     },
 };
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use reqwest::{RequestBuilder, StatusCode};
 use serde::Deserialize;
+use std::borrow::Cow;
 use thiserror::Error;
 
 struct FtxSigner {
@@ -28,7 +27,10 @@ struct FtxSignConfig<'a> {
 }
 
 impl Signer for FtxSigner {
-    type Config<'a> = FtxSignConfig<'a> where Self: 'a;
+    type Config<'a>
+        = FtxSignConfig<'a>
+    where
+        Self: 'a;
 
     fn config<'a, Request>(
         &'a self,
@@ -126,7 +128,7 @@ struct FetchBalancesResponse {
 #[allow(dead_code)]
 struct FtxBalance {
     #[serde(rename = "coin")]
-    symbol: Symbol,
+    symbol: AssetNameInternal,
     total: f64,
 }
 

@@ -3,24 +3,26 @@ use self::{
     trade::CoinbaseTrade,
 };
 use crate::{
-    exchange::{Connector, ExchangeId, ExchangeSub, StreamSelector},
+    ExchangeWsStream, NoInitialSnapshots,
+    exchange::{Connector, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{validator::WebSocketSubValidator, WebSocketSubscriber},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::trade::PublicTrades,
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
 use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use barter_macro::{DeExchange, SerExchange};
+use derive_more::Display;
 use serde_json::json;
 use url::Url;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific channel used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific channel used for generating [`Connector::requests`].
 pub mod channel;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific market used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific market used for generating [`Connector::requests`].
 pub mod market;
 
 /// [`Subscription`](crate::subscription::Subscription) response type and response
@@ -33,13 +35,24 @@ pub mod trade;
 /// [`Coinbase`] server base url.
 ///
 /// See docs: <https://docs.cloud.coinbase.com/exchange/docs/websocket-overview>
-pub const BASE_URL_COINBASE: &str = "wss://ws-feed.exchange.coinbase.com";
+pub const BASE_URL_COINBASE: &str = "wss://ws-feed.execution.coinbase.com";
 
-/// [`Coinbase`] exchange.
+/// [`Coinbase`] execution.
 ///
 /// See docs: <https://docs.cloud.coinbase.com/exchange/docs/websocket-overview>
 #[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, DeExchange, SerExchange,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Debug,
+    Default,
+    Display,
+    DeExchange,
+    SerExchange,
 )]
 pub struct Coinbase;
 
@@ -59,7 +72,7 @@ impl Connector for Coinbase {
         exchange_subs
             .into_iter()
             .map(|ExchangeSub { channel, market }| {
-                WsMessage::Text(
+                WsMessage::text(
                     json!({
                         "type": "subscribe",
                         "product_ids": [market.as_ref()],
@@ -76,6 +89,7 @@ impl<Instrument> StreamSelector<Instrument, PublicTrades> for Coinbase
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream =
-        ExchangeWsStream<StatelessTransformer<Self, Instrument::Id, PublicTrades, CoinbaseTrade>>;
+        ExchangeWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, CoinbaseTrade>>;
 }

@@ -1,13 +1,13 @@
 use super::KrakenMessage;
 use crate::{
-    event::{MarketEvent, MarketIter},
-    exchange::ExchangeId,
-    subscription::trade::PublicTrade,
     Identifier,
+    event::{MarketEvent, MarketIter},
+    subscription::trade::PublicTrade,
 };
+use barter_instrument::{Side, exchange::ExchangeId};
 use barter_integration::{
     de::{datetime_utc_from_epoch_duration, extract_next},
-    model::{Exchange, Side, SubscriptionId},
+    subscription::SubscriptionId,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -17,7 +17,7 @@ pub type KrakenTrades = KrakenMessage<KrakenTradesInner>;
 
 /// Collection of [`KrakenTrade`] items with an associated [`SubscriptionId`] (eg/ "trade|XBT/USD").
 ///
-/// See [`KrakenMessage`](super::message::KrakenMessage) for full raw payload examples.
+/// See [`KrakenMessage`] for full raw payload examples.
 ///
 /// See docs: <https://docs.kraken.com/websockets/#message-trade>
 #[derive(Clone, PartialEq, PartialOrd, Debug, Serialize)]
@@ -28,7 +28,7 @@ pub struct KrakenTradesInner {
 
 /// [`Kraken`](super::Kraken) trade.
 ///
-/// See [`KrakenMessage`](super::message::KrakenMessage) for full raw payload examples.
+/// See [`KrakenMessage`] for full raw payload examples.
 ///
 /// See docs: <https://docs.kraken.com/websockets/#message-trade>
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Serialize)]
@@ -51,26 +51,26 @@ impl Identifier<Option<SubscriptionId>> for KrakenTradesInner {
 fn custom_kraken_trade_id(trade: &KrakenTrade) -> String {
     format!(
         "{}_{}_{}_{}",
-        trade.time.timestamp_nanos(),
+        trade.time.timestamp_micros(),
         trade.side,
         trade.price,
         trade.amount
     )
 }
 
-impl<InstrumentId: Clone> From<(ExchangeId, InstrumentId, KrakenTrades)>
-    for MarketIter<InstrumentId, PublicTrade>
+impl<InstrumentKey: Clone> From<(ExchangeId, InstrumentKey, KrakenTrades)>
+    for MarketIter<InstrumentKey, PublicTrade>
 {
-    fn from((exchange_id, instrument, trades): (ExchangeId, InstrumentId, KrakenTrades)) -> Self {
+    fn from((exchange, instrument, trades): (ExchangeId, InstrumentKey, KrakenTrades)) -> Self {
         match trades {
             KrakenTrades::Data(trades) => trades
                 .trades
                 .into_iter()
                 .map(|trade| {
                     Ok(MarketEvent {
-                        exchange_time: trade.time,
-                        received_time: Utc::now(),
-                        exchange: Exchange::from(exchange_id),
+                        time_exchange: trade.time,
+                        time_received: Utc::now(),
+                        exchange,
                         instrument: instrument.clone(),
                         kind: PublicTrade {
                             id: custom_kraken_trade_id(&trade),
@@ -210,10 +210,9 @@ mod tests {
 
     mod de {
         use super::*;
+        use barter_instrument::Side;
         use barter_integration::{
-            de::datetime_utc_from_epoch_duration,
-            error::SocketError,
-            model::{Side, SubscriptionId},
+            de::datetime_utc_from_epoch_duration, error::SocketError, subscription::SubscriptionId,
         };
 
         #[test]
@@ -284,7 +283,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }

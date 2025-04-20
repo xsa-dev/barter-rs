@@ -1,45 +1,47 @@
 use super::Gateio;
-use crate::{
-    instrument::{KeyedInstrument, MarketInstrumentData},
-    subscription::Subscription,
-    Identifier,
-};
-use barter_integration::model::instrument::{
-    kind::{InstrumentKind, OptionKind},
-    Instrument,
+use crate::{Identifier, instrument::MarketInstrumentData, subscription::Subscription};
+use barter_instrument::{
+    Keyed,
+    instrument::{
+        kind::option::OptionKind,
+        market_data::{MarketDataInstrument, kind::MarketDataInstrumentKind::*},
+    },
 };
 use chrono::{
-    format::{DelayedFormat, StrftimeItems},
     DateTime, Utc,
+    format::{DelayedFormat, StrftimeItems},
 };
 use serde::{Deserialize, Serialize};
+use smol_str::{SmolStr, StrExt, format_smolstr};
 
 /// Type that defines how to translate a Barter [`Subscription`] into a
-/// [`Gateio`](super::Gateio) market that can be subscribed to.
+/// [`Gateio`] market that can be subscribed to.
 ///
 /// See docs: <https://www.okx.com/docs-v5/en/#websocket-api-public-channel>
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
-pub struct GateioMarket(pub String);
+pub struct GateioMarket(pub SmolStr);
 
-impl<Server, Kind> Identifier<GateioMarket> for Subscription<Gateio<Server>, Instrument, Kind> {
+impl<Server, Kind> Identifier<GateioMarket>
+    for Subscription<Gateio<Server>, MarketDataInstrument, Kind>
+{
     fn id(&self) -> GateioMarket {
         gateio_market(&self.instrument)
     }
 }
 
-impl<Server, Kind> Identifier<GateioMarket>
-    for Subscription<Gateio<Server>, KeyedInstrument, Kind>
+impl<Server, InstrumentKey, Kind> Identifier<GateioMarket>
+    for Subscription<Gateio<Server>, Keyed<InstrumentKey, MarketDataInstrument>, Kind>
 {
     fn id(&self) -> GateioMarket {
-        gateio_market(&self.instrument.data)
+        gateio_market(&self.instrument.value)
     }
 }
 
-impl<Server, Kind> Identifier<GateioMarket>
-    for Subscription<Gateio<Server>, MarketInstrumentData, Kind>
+impl<Server, InstrumentKey, Kind> Identifier<GateioMarket>
+    for Subscription<Gateio<Server>, MarketInstrumentData<InstrumentKey>, Kind>
 {
     fn id(&self) -> GateioMarket {
-        GateioMarket(self.instrument.name_exchange.clone())
+        GateioMarket(self.instrument.name_exchange.name().clone())
     }
 }
 
@@ -49,27 +51,29 @@ impl AsRef<str> for GateioMarket {
     }
 }
 
-fn gateio_market(instrument: &Instrument) -> GateioMarket {
-    use InstrumentKind::*;
-    let Instrument { base, quote, kind } = instrument;
+fn gateio_market(instrument: &MarketDataInstrument) -> GateioMarket {
+    let MarketDataInstrument { base, quote, kind } = instrument;
 
     GateioMarket(
         match kind {
-            Spot | Perpetual => format!("{base}_{quote}"),
-            Future(future) => {
-                format!("{base}_{quote}_QUARTERLY_{}", format_expiry(future.expiry))
+            Spot | Perpetual => format_smolstr!("{base}_{quote}"),
+            Future(contract) => {
+                format_smolstr!(
+                    "{base}_{quote}_QUARTERLY_{}",
+                    format_expiry(contract.expiry)
+                )
             }
-            Option(option) => format!(
+            Option(contract) => format_smolstr!(
                 "{base}_{quote}-{}-{}-{}",
-                format_expiry(option.expiry),
-                option.strike,
-                match option.kind {
+                format_expiry(contract.expiry),
+                contract.strike,
+                match contract.kind {
                     OptionKind::Call => "C",
                     OptionKind::Put => "P",
                 },
             ),
         }
-        .to_uppercase(),
+        .to_uppercase_smolstr(),
     )
 }
 

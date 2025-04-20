@@ -1,19 +1,20 @@
 use barter_data::{
-    event::{DataKind, MarketEvent},
+    event::DataKind,
     exchange::{
         binance::{futures::BinanceFuturesUsd, spot::BinanceSpot},
-        kraken::Kraken,
         okx::Okx,
     },
-    streams::Streams,
+    streams::{Streams, consumer::MarketStreamResult, reconnect::stream::ReconnectingStream},
     subscription::{
         book::{OrderBooksL1, OrderBooksL2},
         trade::PublicTrades,
     },
 };
-use barter_integration::model::instrument::{kind::InstrumentKind, Instrument};
+use barter_instrument::instrument::market_data::{
+    MarketDataInstrument, kind::MarketDataInstrumentKind,
+};
 use tokio_stream::StreamExt;
-use tracing::info;
+use tracing::{info, warn};
 
 #[rustfmt::skip]
 #[tokio::main]
@@ -22,61 +23,58 @@ async fn main() {
     init_logging();
 
     // Notes:
-    // - MarketEvent<DataKind> could use a custom enumeration if more flexibility is required.
-    // - Each call to StreamBuilder::subscribe() creates a separate WebSocket connection for those
+    // - MarketStreamResult<_, DataKind> could use a custom enumeration if more flexibility is required.
+    // - Each call to StreamBuilder::subscribe() creates a separate WebSocket connection for the
     //   Subscriptions passed.
 
     // Initialise MarketEvent<DataKind> Streams for various exchanges
-    let streams: Streams<MarketEvent<Instrument, DataKind>> = Streams::builder_multi()
+    let streams: Streams<MarketStreamResult<MarketDataInstrument, DataKind>> = Streams::builder_multi()
 
         // Add PublicTrades Streams for various exchanges
         .add(Streams::<PublicTrades>::builder()
             .subscribe([
-                (BinanceSpot::default(), "btc", "usdt", InstrumentKind::Spot, PublicTrades),
+                (BinanceSpot::default(), "btc", "usdt", MarketDataInstrumentKind::Spot, PublicTrades),
             ])
             .subscribe([
-                (BinanceFuturesUsd::default(), "btc", "usdt", InstrumentKind::Perpetual, PublicTrades),
+                (BinanceFuturesUsd::default(), "btc", "usdt", MarketDataInstrumentKind::Perpetual, PublicTrades),
             ])
             .subscribe([
-                (Okx, "btc", "usdt", InstrumentKind::Spot, PublicTrades),
-                (Okx, "btc", "usdt", InstrumentKind::Perpetual, PublicTrades),
+                (Okx, "btc", "usdt", MarketDataInstrumentKind::Spot, PublicTrades),
+                (Okx, "btc", "usdt", MarketDataInstrumentKind::Perpetual, PublicTrades),
             ])
         )
 
         // Add OrderBooksL1 Stream for various exchanges
         .add(Streams::<OrderBooksL1>::builder()
             .subscribe([
-                (BinanceSpot::default(), "btc", "usdt", InstrumentKind::Spot, OrderBooksL1),
+                (BinanceSpot::default(), "btc", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL1),
             ])
             .subscribe([
-                (BinanceFuturesUsd::default(), "btc", "usdt", InstrumentKind::Perpetual, OrderBooksL1),
-            ])
-            .subscribe([
-                (Kraken, "xbt", "usd", InstrumentKind::Spot, OrderBooksL1),
+                (BinanceFuturesUsd::default(), "btc", "usdt", MarketDataInstrumentKind::Perpetual, OrderBooksL1),
             ])
         )
 
         // Add OrderBooksL2 Stream for various exchanges
         .add(Streams::<OrderBooksL2>::builder()
             .subscribe([
-                (BinanceSpot::default(), "btc", "usdt", InstrumentKind::Spot, OrderBooksL2),
+                (BinanceSpot::default(), "btc", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL2),
             ])
             .subscribe([
-                (BinanceFuturesUsd::default(), "btc", "usdt", InstrumentKind::Perpetual, OrderBooksL2),
+                (BinanceFuturesUsd::default(), "btc", "usdt", MarketDataInstrumentKind::Perpetual, OrderBooksL2),
             ])
         )
         .init()
         .await
         .unwrap();
 
-    // Join all exchange Streams into a single tokio_stream::StreamMap
-    // Notes:
-    //  - Use `streams.select(ExchangeId)` to interact with the individual exchange streams!
-    //  - Use `streams.join()` to join all exchange streams into a single mpsc::UnboundedReceiver!
-    let mut joined_stream = streams.join_map().await;
+    // Select and merge every exchange Stream using futures_util::stream::select_all
+    // Note: use `Streams.select(ExchangeId)` to interact with individual exchange streams!
+    let mut joined_stream = streams
+        .select_all()
+        .with_error_handler(|error| warn!(?error, "MarketStream generated error"));
 
-    while let Some((exchange, data)) = joined_stream.next().await {
-        info!("Exchange: {exchange}, MarketEvent<DataKind>: {data:?}");
+    while let Some(event) = joined_stream.next().await {
+        info!("{event:?}");
     }
 }
 

@@ -1,9 +1,9 @@
 use crate::{
     event::{MarketEvent, MarketIter},
-    exchange::{bitmex::message::BitmexMessage, ExchangeId},
+    exchange::bitmex::message::BitmexMessage,
     subscription::trade::PublicTrade,
 };
-use barter_integration::model::{Exchange, Side};
+use barter_instrument::{Side, exchange::ExchangeId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -37,9 +37,7 @@ pub type BitmexTrade = BitmexMessage<BitmexTradeInner>;
 #[derive(Clone, PartialEq, PartialOrd, Debug, Deserialize, Serialize)]
 pub struct BitmexTradeInner {
     pub timestamp: DateTime<Utc>,
-
     pub symbol: String,
-
     pub side: Side,
     #[serde(rename = "size")]
     pub amount: f64,
@@ -49,19 +47,19 @@ pub struct BitmexTradeInner {
     pub id: String,
 }
 
-impl<InstrumentId: Clone> From<(ExchangeId, InstrumentId, BitmexTrade)>
-    for MarketIter<InstrumentId, PublicTrade>
+impl<InstrumentKey: Clone> From<(ExchangeId, InstrumentKey, BitmexTrade)>
+    for MarketIter<InstrumentKey, PublicTrade>
 {
-    fn from((exchange_id, instrument, trades): (ExchangeId, InstrumentId, BitmexTrade)) -> Self {
+    fn from((exchange, instrument, trades): (ExchangeId, InstrumentKey, BitmexTrade)) -> Self {
         Self(
             trades
                 .data
                 .into_iter()
                 .map(|trade| {
                     Ok(MarketEvent {
-                        exchange_time: trade.timestamp,
-                        received_time: Utc::now(),
-                        exchange: Exchange::from(exchange_id),
+                        time_exchange: trade.timestamp,
+                        time_received: Utc::now(),
+                        exchange,
                         instrument: instrument.clone(),
                         kind: PublicTrade {
                             id: trade.id,
@@ -133,7 +131,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }
@@ -196,7 +196,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }

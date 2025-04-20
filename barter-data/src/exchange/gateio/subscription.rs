@@ -1,5 +1,5 @@
 use super::message::GateioMessage;
-use barter_integration::{error::SocketError, Validator};
+use barter_integration::{Validator, error::SocketError};
 use serde::{Deserialize, Serialize};
 
 /// Expected [`Gateio`](super::Gateio) [`Subscription`](crate::subscription::Subscription) response
@@ -9,7 +9,7 @@ pub type GateioSubResponse = GateioMessage<GateioSubResult>;
 /// Expected [`Gateio`](super::Gateio) [`Subscription`](crate::subscription::Subscription)
 /// response type.
 ///
-/// See [`GateioMessage`](super::message::GateioMessage) for full raw payload examples.
+/// See [`GateioMessage`] for full raw payload examples.
 ///
 /// See docs: <https://www.gate.io/docs/developers/apiv4/ws/en/#server-response>
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
@@ -80,7 +80,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }

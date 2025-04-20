@@ -1,23 +1,23 @@
 use super::subscription::{BitfinexPlatformEvent, BitfinexSubResponse};
 use crate::{
+    Identifier,
     exchange::{Connector, ExchangeSub},
-    instrument::InstrumentData,
     subscriber::validator::SubscriptionValidator,
     subscription::{Map, SubscriptionKind},
-    Identifier,
 };
 use async_trait::async_trait;
 use barter_integration::{
-    error::SocketError,
-    model::SubscriptionId,
-    protocol::{
-        websocket::{WebSocket, WebSocketParser},
-        StreamParser,
-    },
     Validator,
+    error::SocketError,
+    protocol::{
+        StreamParser,
+        websocket::{WebSocket, WebSocketParser, WsMessage},
+    },
+    subscription::SubscriptionId,
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use smol_str::ToSmolStr;
 use tracing::debug;
 
 /// [`Bitfinex`](super::Bitfinex) specific [`SubscriptionValidator`].
@@ -39,30 +39,33 @@ impl SubscriptionValidator for BitfinexWebSocketSubValidator {
     type Parser = WebSocketParser;
 
     async fn validate<Exchange, Instrument, Kind>(
-        mut map: Map<Instrument::Id>,
+        mut instrument_map: Map<Instrument>,
         websocket: &mut WebSocket,
-    ) -> Result<Map<Instrument::Id>, SocketError>
+    ) -> Result<(Map<Instrument>, Vec<WsMessage>), SocketError>
     where
         Exchange: Connector + Send,
-        Instrument: InstrumentData,
+        Instrument: Send,
         Kind: SubscriptionKind + Send,
     {
-        // Establish exchange specific subscription validation parameters
+        // Establish execution specific subscription validation parameters
         let timeout = Exchange::subscription_timeout();
-        let expected_responses = Exchange::expected_responses(&map);
+        let expected_responses = Exchange::expected_responses(&instrument_map);
 
         // Parameter to keep track of successful Subscription outcomes
         // '--> Bitfinex sends snapshots as the first message, so count them also
         let mut success_responses = 0usize;
         let mut init_snapshots_received = 0usize;
 
+        // Buffer any active Subscription market events that are received during validation
+        let mut buff_active_subscription_events = Vec::new();
+
         loop {
             // Break if all Subscriptions were a success
             if success_responses == expected_responses
                 && init_snapshots_received == expected_responses
             {
-                debug!(exchange = %Exchange::ID, "validated exchange WebSocket subscriptions");
-                break Ok(map);
+                debug!(exchange = %Exchange::ID, "validated execution WebSocket subscriptions");
+                break Ok((instrument_map, buff_active_subscription_events));
             }
 
             tokio::select! {
@@ -99,9 +102,9 @@ impl SubscriptionValidator for BitfinexWebSocketSubValidator {
                                 let subscription_id = ExchangeSub::from((channel, market)).id();
 
                                 // Replace SubscriptionId with SubscriptionId(channel_id)
-                                if let Some(subscription) = map.0.remove(&subscription_id) {
+                                if let Some(subscription) = instrument_map.0.remove(&subscription_id) {
                                     success_responses += 1;
-                                    map.0.insert(SubscriptionId(channel_id.0.to_string()), subscription);
+                                    instrument_map.0.insert(SubscriptionId(channel_id.0.to_smolstr()), subscription);
 
                                     debug!(
                                         exchange = %Exchange::ID,
@@ -119,17 +122,10 @@ impl SubscriptionValidator for BitfinexWebSocketSubValidator {
                             // Not reachable after BitfinexPlatformEvent validate()
                             Ok(BitfinexPlatformEvent::Error(error)) => panic!("{error:?}"),
                         }
-                        Some(Err(SocketError::Deserialise { error, payload })) if success_responses >= 1 => {
+                        Some(Err(SocketError::Deserialise { error: _, payload })) if success_responses >= 1 => {
                             // Already active Bitfinex subscriptions will send initial snapshots
                             init_snapshots_received += 1;
-                            debug!(
-                                exchange = %Exchange::ID,
-                                ?error,
-                                %success_responses,
-                                %expected_responses,
-                                %payload,
-                                "failed to deserialise non SubResponse payload"
-                            );
+                            buff_active_subscription_events.push(WsMessage::text(payload));
                             continue
                         }
                         Some(Err(SocketError::Terminated(close_frame))) => {

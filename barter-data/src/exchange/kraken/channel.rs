@@ -1,12 +1,12 @@
 use super::Kraken;
 use crate::{
-    subscription::{book::OrderBooksL1, trade::PublicTrades, Subscription},
     Identifier,
+    subscription::{Subscription, book::OrderBooksL1, trade::PublicTrades},
 };
 use serde::Serialize;
 
 /// Type that defines how to translate a Barter [`Subscription`] into a
-/// [`Kraken`](super::Kraken) channel to be subscribed to.
+/// [`Kraken`] channel to be subscribed to.
 ///
 /// See docs: <https://docs.kraken.com/websockets/#message-subscribe>
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize)]
@@ -18,7 +18,7 @@ impl KrakenChannel {
     /// See docs: <https://docs.kraken.com/websockets/#message-subscribe>
     pub const TRADES: Self = Self("trade");
 
-    /// [`Kraken`] real-time OrderBook Level1 (top of book) channel name.
+    /// [`Kraken`] real-time OrderBook Level1 (top of books) channel name.
     ///
     /// See docs: <https://docs.kraken.com/websockets/#message-subscribe>
     pub const ORDER_BOOK_L1: Self = Self("spread");

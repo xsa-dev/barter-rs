@@ -1,20 +1,22 @@
 use crate::{
+    ExchangeWsStream, NoInitialSnapshots,
     exchange::{
-        gateio::{perpetual::trade::GateioFuturesTrades, Gateio},
-        ExchangeId, ExchangeServer, StreamSelector,
+        ExchangeServer, StreamSelector,
+        gateio::{Gateio, perpetual::trade::GateioFuturesTrades},
     },
     instrument::InstrumentData,
     subscription::trade::PublicTrades,
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
+use std::fmt::Display;
 
 /// [`GateioFuturesUsd`] WebSocket server base url.
 ///
 /// See docs: <https://www.gate.io/docs/developers/delivery/ws/en/>
 pub const WEBSOCKET_BASE_URL_GATEIO_FUTURES_USD: &str = "wss://fx-ws.gateio.ws/v4/ws/delivery/usdt";
 
-/// [`Gateio`] perpetual usd exchange.
+/// [`Gateio`] perpetual usd execution.
 pub type GateioFuturesUsd = Gateio<GateioServerFuturesUsd>;
 
 /// [`Gateio`] perpetual usd [`ExchangeServer`].
@@ -33,9 +35,16 @@ impl<Instrument> StreamSelector<Instrument, PublicTrades> for GateioFuturesUsd
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream = ExchangeWsStream<
-        StatelessTransformer<Self, Instrument::Id, PublicTrades, GateioFuturesTrades>,
+        StatelessTransformer<Self, Instrument::Key, PublicTrades, GateioFuturesTrades>,
     >;
+}
+
+impl Display for GateioFuturesUsd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GateioFuturesUsd")
+    }
 }
 
 /// [`GateioFuturesBtc`] WebSocket server base url.
@@ -43,7 +52,7 @@ where
 /// See docs: <https://www.gate.io/docs/developers/delivery/ws/en/>
 pub const WEBSOCKET_BASE_URL_GATEIO_FUTURES_BTC: &str = "wss://fx-ws.gateio.ws/v4/ws/delivery/btc";
 
-/// [`Gateio`] perpetual btc exchange.
+/// [`Gateio`] perpetual btc execution.
 pub type GateioFuturesBtc = Gateio<GateioServerFuturesBtc>;
 
 /// [`Gateio`] perpetual btc [`ExchangeServer`].
@@ -62,7 +71,14 @@ impl<Instrument> StreamSelector<Instrument, PublicTrades> for GateioFuturesBtc
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream = ExchangeWsStream<
-        StatelessTransformer<Self, Instrument::Id, PublicTrades, GateioFuturesTrades>,
+        StatelessTransformer<Self, Instrument::Key, PublicTrades, GateioFuturesTrades>,
     >;
+}
+
+impl Display for GateioFuturesBtc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GateioFuturesBtc")
+    }
 }

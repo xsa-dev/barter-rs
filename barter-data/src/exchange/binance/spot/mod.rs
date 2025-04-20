@@ -1,15 +1,19 @@
-use self::l2::BinanceSpotBookUpdater;
 use super::{Binance, ExchangeServer};
 use crate::{
-    exchange::{ExchangeId, StreamSelector},
-    subscription::book::OrderBooksL2,
-    transformer::book::MultiBookTransformer,
     ExchangeWsStream,
+    exchange::{
+        StreamSelector,
+        binance::spot::l2::{
+            BinanceSpotOrderBooksL2SnapshotFetcher, BinanceSpotOrderBooksL2Transformer,
+        },
+    },
+    instrument::InstrumentData,
+    subscription::book::OrderBooksL2,
 };
-use barter_integration::model::instrument::Instrument;
+use barter_instrument::exchange::ExchangeId;
+use std::fmt::{Display, Formatter};
 
-/// Level 2 OrderBook types (top of book) and spot
-/// [`OrderBookUpdater`](crate::transformer::book::OrderBookUpdater) implementation.
+/// Level 2 OrderBook types.
 pub mod l2;
 
 /// [`BinanceSpot`] WebSocket server base url.
@@ -17,7 +21,7 @@ pub mod l2;
 /// See docs: <https://binance-docs.github.io/apidocs/spot/en/#websocket-market-streams>
 pub const WEBSOCKET_BASE_URL_BINANCE_SPOT: &str = "wss://stream.binance.com:9443/ws";
 
-/// [`Binance`] spot exchange.
+/// [`Binance`] spot execution.
 pub type BinanceSpot = Binance<BinanceServerSpot>;
 
 /// [`Binance`] spot [`ExchangeServer`].
@@ -32,8 +36,16 @@ impl ExchangeServer for BinanceServerSpot {
     }
 }
 
-impl StreamSelector<Instrument, OrderBooksL2> for BinanceSpot {
-    type Stream = ExchangeWsStream<
-        MultiBookTransformer<Self, Instrument, OrderBooksL2, BinanceSpotBookUpdater>,
-    >;
+impl<Instrument> StreamSelector<Instrument, OrderBooksL2> for BinanceSpot
+where
+    Instrument: InstrumentData,
+{
+    type SnapFetcher = BinanceSpotOrderBooksL2SnapshotFetcher;
+    type Stream = ExchangeWsStream<BinanceSpotOrderBooksL2Transformer<Instrument::Key>>;
+}
+
+impl Display for BinanceSpot {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BinanceSpot")
+    }
 }

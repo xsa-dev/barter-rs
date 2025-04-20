@@ -1,18 +1,19 @@
 use crate::{
+    ExchangeWsStream, NoInitialSnapshots,
     exchange::{
+        Connector, ExchangeServer, PingInterval, StreamSelector,
         bybit::{
             channel::BybitChannel, market::BybitMarket, message::BybitMessage,
             subscription::BybitResponse,
         },
         subscription::ExchangeSub,
-        Connector, ExchangeId, ExchangeServer, PingInterval, StreamSelector,
     },
     instrument::InstrumentData,
-    subscriber::{validator::WebSocketSubValidator, WebSocketSubscriber},
-    subscription::{trade::PublicTrades, Map},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscription::{Map, trade::PublicTrades},
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
 use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use serde::de::{Error, Unexpected};
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
@@ -20,7 +21,7 @@ use tokio::time;
 use url::Url;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific channel used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific channel used for generating [`Connector::requests`].
 pub mod channel;
 
 /// [`ExchangeServer`] and [`StreamSelector`] implementations for
@@ -28,7 +29,7 @@ pub mod channel;
 pub mod futures;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific market used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific market used for generating [`Connector::requests`].
 pub mod market;
 
 /// Generic [`BybitPayload<T>`](message::BybitPayload) type common to
@@ -48,7 +49,7 @@ pub mod subscription;
 /// [`BybitFuturesUsd`](futures::BybitPerpetualsUsd).
 pub mod trade;
 
-/// Generic [`Bybit<Server>`](Bybit) exchange.
+/// Generic [`Bybit<Server>`](Bybit) execution.
 ///
 /// ### Notes
 /// A `Server` [`ExchangeServer`] implementations exists for
@@ -77,7 +78,7 @@ where
         Some(PingInterval {
             interval: time::interval(Duration::from_millis(5_000)),
             ping: || {
-                WsMessage::Text(
+                WsMessage::text(
                     serde_json::json!({
                         "op": "ping",
                     })
@@ -93,7 +94,7 @@ where
             .map(|sub| format!("{}.{}", sub.channel.as_ref(), sub.market.as_ref(),))
             .collect::<Vec<String>>();
 
-        vec![WsMessage::Text(
+        vec![WsMessage::text(
             serde_json::json!({
                 "op": "subscribe",
                 "args": stream_names
@@ -102,7 +103,7 @@ where
         )]
     }
 
-    fn expected_responses<InstrumentId>(_: &Map<InstrumentId>) -> usize {
+    fn expected_responses<InstrumentKey>(_: &Map<InstrumentKey>) -> usize {
         1
     }
 }
@@ -112,8 +113,9 @@ where
     Instrument: InstrumentData,
     Server: ExchangeServer + Debug + Send + Sync,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream =
-        ExchangeWsStream<StatelessTransformer<Self, Instrument::Id, PublicTrades, BybitMessage>>;
+        ExchangeWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, BybitMessage>>;
 }
 
 impl<'de, Server> serde::Deserialize<'de> for Bybit<Server>
@@ -125,12 +127,14 @@ where
         D: serde::de::Deserializer<'de>,
     {
         let input = <&str as serde::Deserialize>::deserialize(deserializer)?;
-        let expected = Self::ID.as_str();
 
         if input == Self::ID.as_str() {
             Ok(Self::default())
         } else {
-            Err(Error::invalid_value(Unexpected::Str(input), &expected))
+            Err(Error::invalid_value(
+                Unexpected::Str(input),
+                &Self::ID.as_str(),
+            ))
         }
     }
 }
@@ -143,7 +147,6 @@ where
     where
         S: serde::ser::Serializer,
     {
-        let exchange_id = Self::ID.as_str();
-        serializer.serialize_str(exchange_id)
+        serializer.serialize_str(Self::ID.as_str())
     }
 }

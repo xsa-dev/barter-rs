@@ -1,4 +1,4 @@
-use crate::model::SubscriptionId;
+use crate::subscription::SubscriptionId;
 use reqwest::Error;
 use thiserror::Error;
 
@@ -39,7 +39,7 @@ pub enum SocketError {
     Terminated(String),
 
     #[error("{entity} does not support: {item}")]
-    Unsupported { entity: &'static str, item: String },
+    Unsupported { entity: String, item: String },
 
     #[error("WebSocket error: {0}")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
@@ -57,7 +57,7 @@ pub enum SocketError {
     #[error("consumed unidentifiable message: {0}")]
     Unidentifiable(SubscriptionId),
 
-    #[error("consumed error message from exchange: {0}")]
+    #[error("consumed error message from execution: {0}")]
     Exchange(String),
 }
 

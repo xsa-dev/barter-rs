@@ -1,11 +1,11 @@
 use super::super::BinanceChannel;
 use crate::{
-    event::{MarketEvent, MarketIter},
-    exchange::ExchangeId,
-    subscription::liquidation::Liquidation,
     Identifier,
+    event::{MarketEvent, MarketIter},
+    subscription::liquidation::Liquidation,
 };
-use barter_integration::model::{Exchange, Side, SubscriptionId};
+use barter_instrument::{Side, exchange::ExchangeId};
+use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -81,16 +81,16 @@ impl Identifier<Option<SubscriptionId>> for BinanceLiquidation {
     }
 }
 
-impl<InstrumentId> From<(ExchangeId, InstrumentId, BinanceLiquidation)>
-    for MarketIter<InstrumentId, Liquidation>
+impl<InstrumentKey> From<(ExchangeId, InstrumentKey, BinanceLiquidation)>
+    for MarketIter<InstrumentKey, Liquidation>
 {
     fn from(
-        (exchange_id, instrument, liquidation): (ExchangeId, InstrumentId, BinanceLiquidation),
+        (exchange_id, instrument, liquidation): (ExchangeId, InstrumentKey, BinanceLiquidation),
     ) -> Self {
         Self(vec![Ok(MarketEvent {
-            exchange_time: liquidation.order.time,
-            received_time: Utc::now(),
-            exchange: Exchange::from(exchange_id),
+            time_exchange: liquidation.order.time,
+            time_received: Utc::now(),
+            exchange: exchange_id,
             instrument,
             kind: Liquidation {
                 side: liquidation.order.side,

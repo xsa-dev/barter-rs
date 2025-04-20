@@ -1,20 +1,18 @@
 use crate::{
-    event::MarketIter,
-    exchange::{
-        bybit::{channel::BybitChannel, subscription::BybitResponse, trade::BybitTrade},
-        ExchangeId,
-    },
-    subscription::trade::PublicTrade,
     Identifier,
+    event::MarketIter,
+    exchange::bybit::{channel::BybitChannel, subscription::BybitResponse, trade::BybitTrade},
+    subscription::trade::PublicTrade,
 };
-use barter_integration::model::SubscriptionId;
+use barter_instrument::exchange::ExchangeId;
+use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use serde::{
-    de::{Error, Unexpected},
     Deserialize, Serialize,
+    de::{Error, Unexpected},
 };
 
-/// [`Bybit`](super::Bybit) websocket message supports both [`BybitTrade`](BybitTrade) and [`BybitResponse`](BybitResponse) .
+/// [`Bybit`](super::Bybit) websocket message supports both [`BybitTrade`] and [`BybitResponse`].
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum BybitMessage {
@@ -92,10 +90,10 @@ impl Identifier<Option<SubscriptionId>> for BybitMessage {
     }
 }
 
-impl<InstrumentId: Clone> From<(ExchangeId, InstrumentId, BybitMessage)>
-    for MarketIter<InstrumentId, PublicTrade>
+impl<InstrumentKey: Clone> From<(ExchangeId, InstrumentKey, BybitMessage)>
+    for MarketIter<InstrumentKey, PublicTrade>
 {
-    fn from((exchange_id, instrument, message): (ExchangeId, InstrumentId, BybitMessage)) -> Self {
+    fn from((exchange_id, instrument, message): (ExchangeId, InstrumentKey, BybitMessage)) -> Self {
         match message {
             BybitMessage::Response(_) => Self(vec![]),
             BybitMessage::Trade(trade) => Self::from((exchange_id, instrument, trade)),
@@ -148,7 +146,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }

@@ -1,7 +1,7 @@
 use crate::{
     error::SocketError,
     metric::{Field, Metric, Tag},
-    protocol::http::{rest::RestRequest, BuildStrategy, HttpParser},
+    protocol::http::{BuildStrategy, HttpParser, rest::RestRequest},
 };
 use bytes::Bytes;
 use chrono::Utc;
@@ -34,7 +34,7 @@ pub struct RestClient<'a, Strategy, Parser> {
     pub parser: Parser,
 }
 
-impl<'a, Strategy, Parser> RestClient<'a, Strategy, Parser>
+impl<Strategy, Parser> RestClient<'_, Strategy, Parser>
 where
     Strategy: BuildStrategy,
     Parser: HttpParser,

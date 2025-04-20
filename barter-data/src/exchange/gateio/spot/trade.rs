@@ -1,11 +1,12 @@
 use super::super::message::GateioMessage;
 use crate::{
-    event::{MarketEvent, MarketIter},
-    exchange::{ExchangeId, ExchangeSub},
-    subscription::trade::PublicTrade,
     Identifier,
+    event::{MarketEvent, MarketIter},
+    exchange::ExchangeSub,
+    subscription::trade::PublicTrade,
 };
-use barter_integration::model::{Exchange, Side, SubscriptionId};
+use barter_instrument::{Side, exchange::ExchangeId};
+use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -53,14 +54,16 @@ impl Identifier<Option<SubscriptionId>> for GateioSpotTrade {
     }
 }
 
-impl<InstrumentId> From<(ExchangeId, InstrumentId, GateioSpotTrade)>
-    for MarketIter<InstrumentId, PublicTrade>
+impl<InstrumentKey> From<(ExchangeId, InstrumentKey, GateioSpotTrade)>
+    for MarketIter<InstrumentKey, PublicTrade>
 {
-    fn from((exchange_id, instrument, trade): (ExchangeId, InstrumentId, GateioSpotTrade)) -> Self {
+    fn from(
+        (exchange_id, instrument, trade): (ExchangeId, InstrumentKey, GateioSpotTrade),
+    ) -> Self {
         Self(vec![Ok(MarketEvent {
-            exchange_time: trade.data.time,
-            received_time: Utc::now(),
-            exchange: Exchange::from(exchange_id),
+            time_exchange: trade.data.time,
+            time_received: Utc::now(),
+            exchange: exchange_id,
             instrument,
             kind: PublicTrade {
                 id: trade.data.id.to_string(),

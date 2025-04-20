@@ -1,10 +1,13 @@
 use barter_data::{
-    exchange::{binance::spot::BinanceSpot, ExchangeId},
-    streams::Streams,
+    exchange::binance::spot::BinanceSpot,
+    streams::{Streams, reconnect::stream::ReconnectingStream},
     subscription::book::OrderBooksL2,
 };
-use barter_integration::model::instrument::kind::InstrumentKind;
-use tracing::info;
+use barter_instrument::{
+    exchange::ExchangeId, instrument::market_data::kind::MarketDataInstrumentKind,
+};
+use futures_util::StreamExt;
+use tracing::{info, warn};
 
 #[rustfmt::skip]
 #[tokio::main]
@@ -18,35 +21,34 @@ async fn main() {
 
         // Separate WebSocket connection for BTC_USDT stream since it's very high volume
         .subscribe([
-            (BinanceSpot::default(), "btc", "usdt", InstrumentKind::Spot, OrderBooksL2),
+            (BinanceSpot::default(), "btc", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL2),
         ])
 
         // Separate WebSocket connection for ETH_USDT stream since it's very high volume
         .subscribe([
-            (BinanceSpot::default(), "eth", "usdt", InstrumentKind::Spot, OrderBooksL2),
+            (BinanceSpot::default(), "eth", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL2),
         ])
 
         // Lower volume Instruments can share a WebSocket connection
         .subscribe([
-            (BinanceSpot::default(), "xrp", "usdt", InstrumentKind::Spot, OrderBooksL2),
-            (BinanceSpot::default(), "sol", "usdt", InstrumentKind::Spot, OrderBooksL2),
-            (BinanceSpot::default(), "avax", "usdt", InstrumentKind::Spot, OrderBooksL2),
-            (BinanceSpot::default(), "ltc", "usdt", InstrumentKind::Spot, OrderBooksL2),
+            (BinanceSpot::default(), "xrp", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL2),
+            (BinanceSpot::default(), "sol", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL2),
+            (BinanceSpot::default(), "avax", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL2),
+            (BinanceSpot::default(), "ltc", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL2),
         ])
         .init()
         .await
         .unwrap();
 
     // Select the ExchangeId::BinanceSpot stream
-    // Notes:
-    //  - Use `streams.select(ExchangeId)` to interact with the individual exchange streams!
-    //  - Use `streams.join()` to join all exchange streams into a single mpsc::UnboundedReceiver!
-    let mut binance_stream = streams
+    // Note: use `Streams.select(ExchangeId)` to interact with individual exchange streams!
+    let mut l1_stream = streams
         .select(ExchangeId::BinanceSpot)
-        .unwrap();
+        .unwrap()
+        .with_error_handler(|error| warn!(?error, "MarketStream generated error"));
 
-    while let Some(order_book_l2) = binance_stream.recv().await {
-        info!("MarketEvent<OrderBook>: {order_book_l2:?}");
+    while let Some(event) = l1_stream.next().await {
+        info!("{event:?}");
     }
 }
 

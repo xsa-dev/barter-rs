@@ -3,13 +3,14 @@ use self::{
     subscription::BinanceSubResponse, trade::BinanceTrade,
 };
 use crate::{
-    exchange::{Connector, ExchangeId, ExchangeServer, ExchangeSub, StreamSelector},
+    ExchangeWsStream, NoInitialSnapshots,
+    exchange::{Connector, ExchangeServer, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{validator::WebSocketSubValidator, WebSocketSubscriber},
-    subscription::{book::OrderBooksL1, trade::PublicTrades, Map},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscription::{Map, book::OrderBooksL1, trade::PublicTrades},
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
 use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use std::{fmt::Debug, marker::PhantomData};
 use url::Url;
@@ -19,7 +20,7 @@ use url::Url;
 pub mod book;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific channel used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific channel used for generating [`Connector::requests`].
 pub mod channel;
 
 /// [`ExchangeServer`] and [`StreamSelector`] implementations for
@@ -27,7 +28,7 @@ pub mod channel;
 pub mod futures;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific market used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific market used for generating [`Connector::requests`].
 pub mod market;
 
 /// [`ExchangeServer`] and [`StreamSelector`] implementations for
@@ -43,7 +44,7 @@ pub mod subscription;
 /// [`BinanceFuturesUsd`](futures::BinanceFuturesUsd).
 pub mod trade;
 
-/// Generic [`Binance<Server>`](Binance) exchange.
+/// Generic [`Binance<Server>`](Binance) execution.
 ///
 /// ### Notes
 /// A `Server` [`ExchangeServer`] implementations exists for
@@ -83,7 +84,7 @@ where
             })
             .collect::<Vec<String>>();
 
-        vec![WsMessage::Text(
+        vec![WsMessage::text(
             serde_json::json!({
                 "method": "SUBSCRIBE",
                 "params": stream_names,
@@ -93,7 +94,7 @@ where
         )]
     }
 
-    fn expected_responses<InstrumentId>(_: &Map<InstrumentId>) -> usize {
+    fn expected_responses<InstrumentKey>(_: &Map<InstrumentKey>) -> usize {
         1
     }
 }
@@ -103,8 +104,9 @@ where
     Instrument: InstrumentData,
     Server: ExchangeServer + Debug + Send + Sync,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream =
-        ExchangeWsStream<StatelessTransformer<Self, Instrument::Id, PublicTrades, BinanceTrade>>;
+        ExchangeWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, BinanceTrade>>;
 }
 
 impl<Instrument, Server> StreamSelector<Instrument, OrderBooksL1> for Binance<Server>
@@ -112,8 +114,9 @@ where
     Instrument: InstrumentData,
     Server: ExchangeServer + Debug + Send + Sync,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream = ExchangeWsStream<
-        StatelessTransformer<Self, Instrument::Id, OrderBooksL1, BinanceOrderBookL1>,
+        StatelessTransformer<Self, Instrument::Key, OrderBooksL1, BinanceOrderBookL1>,
     >;
 }
 
@@ -126,14 +129,13 @@ where
         D: serde::de::Deserializer<'de>,
     {
         let input = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected = Self::ID.as_str();
 
         if input.as_str() == Self::ID.as_str() {
             Ok(Self::default())
         } else {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str(input.as_str()),
-                &expected,
+                &Self::ID.as_str(),
             ))
         }
     }
@@ -147,7 +149,6 @@ where
     where
         S: serde::ser::Serializer,
     {
-        let exchange_id = Self::ID.as_str();
-        serializer.serialize_str(exchange_id)
+        serializer.serialize_str(Self::ID.as_str())
     }
 }

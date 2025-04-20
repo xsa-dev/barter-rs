@@ -1,8 +1,12 @@
-use super::{ExchangeChannel, StreamBuilder, Streams};
+use super::{StreamBuilder, Streams};
 use crate::{
-    error::DataError, event::MarketEvent, exchange::ExchangeId, subscription::SubscriptionKind,
+    error::DataError,
+    streams::{consumer::MarketStreamResult, reconnect::stream::ReconnectingStream},
+    subscription::SubscriptionKind,
 };
-use barter_integration::model::instrument::Instrument;
+use barter_instrument::exchange::ExchangeId;
+use barter_integration::channel::Channel;
+use futures_util::StreamExt;
 use std::{collections::HashMap, fmt::Debug, future::Future, pin::Pin};
 
 /// Communicative type alias representing the [`Future`] result of a [`StreamBuilder::init`] call
@@ -13,7 +17,7 @@ pub type BuilderInitFuture = Pin<Box<dyn Future<Output = Result<(), DataError>>>
 /// multiple [`StreamBuilder<SubscriptionKind>`](StreamBuilder)s.
 #[derive(Default)]
 pub struct MultiStreamBuilder<Output> {
-    pub channels: HashMap<ExchangeId, ExchangeChannel<Output>>,
+    pub channels: HashMap<ExchangeId, Channel<Output>>,
     pub futures: Vec<BuilderInitFuture>,
 }
 
@@ -45,9 +49,11 @@ impl<Output> MultiStreamBuilder<Output> {
     /// Note that the created [`Future`] is not awaited until the [`MultiStreamBuilder::init`]
     /// method is invoked.
     #[allow(clippy::should_implement_trait)]
-    pub fn add<Kind>(mut self, builder: StreamBuilder<Kind>) -> Self
+    pub fn add<InstrumentKey, Kind>(mut self, builder: StreamBuilder<InstrumentKey, Kind>) -> Self
     where
-        Output: From<MarketEvent<Instrument, Kind::Event>> + Send + 'static,
+        Output:
+            From<MarketStreamResult<InstrumentKey, Kind::Event>> + Debug + Clone + Send + 'static,
+        InstrumentKey: Debug + Send + 'static,
         Kind: SubscriptionKind + 'static,
         Kind::Event: Send,
     {
@@ -55,7 +61,7 @@ impl<Output> MultiStreamBuilder<Output> {
         let mut exchange_txs = HashMap::with_capacity(builder.channels.len());
 
         // Iterate over each StreamBuilder exchange present
-        for exchange in builder.channels.keys().copied() {
+        for exchange in builder.channels.keys().cloned() {
             // Insert ExchangeChannel<Output> Entry to Self for each exchange
             let exchange_tx = self.channels.entry(exchange).or_default().tx.clone();
 
@@ -70,19 +76,20 @@ impl<Output> MultiStreamBuilder<Output> {
                 .await?
                 .streams
                 .into_iter()
-                .for_each(|(exchange, mut exchange_rx)| {
+                .for_each(|(exchange, exchange_rx)| {
                     // Remove exchange_tx<Output> from HashMap that's associated with this tuple:
-                    // (ExchangeId, exchange_rx<MarketEvent<SubscriptionKind::Event>>)
+                    // (ExchangeId, exchange_rx<MarketStreamResult<InstrumentKey, SubscriptionKind::Event>>)
                     let exchange_tx = exchange_txs
                         .remove(&exchange)
                         .expect("all exchange_txs should be present here");
 
-                    // Task to receive MarketEvent<SubscriptionKind::Event> and send Outputs via exchange_tx
-                    tokio::spawn(async move {
-                        while let Some(event) = exchange_rx.recv().await {
-                            let _ = exchange_tx.send(Output::from(event));
-                        }
-                    });
+                    // Task to receive MarketStreamResult<SubscriptionKind::Event> and send Outputs via exchange_tx
+                    tokio::spawn(
+                        exchange_rx
+                            .into_stream()
+                            .map(Output::from)
+                            .forward_to(exchange_tx),
+                    );
                 });
 
             Ok(())

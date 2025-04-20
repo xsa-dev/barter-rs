@@ -1,20 +1,22 @@
 use crate::{
+    ExchangeWsStream, NoInitialSnapshots,
     exchange::{
-        gateio::{perpetual::trade::GateioFuturesTrades, Gateio},
-        ExchangeId, ExchangeServer, StreamSelector,
+        ExchangeServer, StreamSelector,
+        gateio::{Gateio, perpetual::trade::GateioFuturesTrades},
     },
     instrument::InstrumentData,
     subscription::trade::PublicTrades,
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
+use std::fmt::Display;
 
 /// [`GateioOptions`] WebSocket server base url.
 ///
 /// See docs: <https://www.gate.io/docs/developers/futures/ws/en/>
 pub const WEBSOCKET_BASE_URL_GATEIO_OPTIONS_USD: &str = "wss://op-ws.gateio.live/v4/ws";
 
-/// [`Gateio`] options exchange.
+/// [`Gateio`] options execution.
 pub type GateioOptions = Gateio<GateioServerOptions>;
 
 /// [`Gateio`] options [`ExchangeServer`].
@@ -33,7 +35,14 @@ impl<Instrument> StreamSelector<Instrument, PublicTrades> for GateioOptions
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream = ExchangeWsStream<
-        StatelessTransformer<Self, Instrument::Id, PublicTrades, GateioFuturesTrades>,
+        StatelessTransformer<Self, Instrument::Key, PublicTrades, GateioFuturesTrades>,
     >;
+}
+
+impl Display for GateioOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GateioOptions")
+    }
 }

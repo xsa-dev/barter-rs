@@ -1,34 +1,37 @@
 use super::Coinbase;
-use crate::{
-    instrument::{KeyedInstrument, MarketInstrumentData},
-    subscription::Subscription,
-    Identifier,
+use crate::{Identifier, instrument::MarketInstrumentData, subscription::Subscription};
+use barter_instrument::{
+    Keyed, asset::name::AssetNameInternal, instrument::market_data::MarketDataInstrument,
 };
-use barter_integration::model::instrument::{symbol::Symbol, Instrument};
 use serde::{Deserialize, Serialize};
+use smol_str::{SmolStr, StrExt, format_smolstr};
 
 /// Type that defines how to translate a Barter [`Subscription`] into a
-/// [`Coinbase`](super::Coinbase) market that can be subscribed to.
+/// [`Coinbase`] market that can be subscribed to.
 ///
 /// See docs: <https://docs.cloud.coinbase.com/exchange/docs/websocket-overview#subscribe>
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
-pub struct CoinbaseMarket(pub String);
+pub struct CoinbaseMarket(pub SmolStr);
 
-impl<Kind> Identifier<CoinbaseMarket> for Subscription<Coinbase, Instrument, Kind> {
+impl<Kind> Identifier<CoinbaseMarket> for Subscription<Coinbase, MarketDataInstrument, Kind> {
     fn id(&self) -> CoinbaseMarket {
         coinbase_market(&self.instrument.base, &self.instrument.quote)
     }
 }
 
-impl<Kind> Identifier<CoinbaseMarket> for Subscription<Coinbase, KeyedInstrument, Kind> {
+impl<InstrumentKey, Kind> Identifier<CoinbaseMarket>
+    for Subscription<Coinbase, Keyed<InstrumentKey, MarketDataInstrument>, Kind>
+{
     fn id(&self) -> CoinbaseMarket {
-        coinbase_market(&self.instrument.data.base, &self.instrument.data.quote)
+        coinbase_market(&self.instrument.value.base, &self.instrument.value.quote)
     }
 }
 
-impl<Kind> Identifier<CoinbaseMarket> for Subscription<Coinbase, MarketInstrumentData, Kind> {
+impl<InstrumentKey, Kind> Identifier<CoinbaseMarket>
+    for Subscription<Coinbase, MarketInstrumentData<InstrumentKey>, Kind>
+{
     fn id(&self) -> CoinbaseMarket {
-        CoinbaseMarket(self.instrument.name_exchange.clone())
+        CoinbaseMarket(self.instrument.name_exchange.name().clone())
     }
 }
 
@@ -38,6 +41,6 @@ impl AsRef<str> for CoinbaseMarket {
     }
 }
 
-fn coinbase_market(base: &Symbol, quote: &Symbol) -> CoinbaseMarket {
-    CoinbaseMarket(format!("{base}-{quote}").to_uppercase())
+fn coinbase_market(base: &AssetNameInternal, quote: &AssetNameInternal) -> CoinbaseMarket {
+    CoinbaseMarket(format_smolstr!("{base}-{quote}").to_uppercase_smolstr())
 }

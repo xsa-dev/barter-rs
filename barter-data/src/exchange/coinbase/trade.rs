@@ -1,11 +1,12 @@
 use super::CoinbaseChannel;
 use crate::{
-    event::{MarketEvent, MarketIter},
-    exchange::{ExchangeId, ExchangeSub},
-    subscription::trade::PublicTrade,
     Identifier,
+    event::{MarketEvent, MarketIter},
+    exchange::ExchangeSub,
+    subscription::trade::PublicTrade,
 };
-use barter_integration::model::{Exchange, Side, SubscriptionId};
+use barter_instrument::{Side, exchange::ExchangeId};
+use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -48,14 +49,14 @@ impl Identifier<Option<SubscriptionId>> for CoinbaseTrade {
     }
 }
 
-impl<InstrumentId> From<(ExchangeId, InstrumentId, CoinbaseTrade)>
-    for MarketIter<InstrumentId, PublicTrade>
+impl<InstrumentKey> From<(ExchangeId, InstrumentKey, CoinbaseTrade)>
+    for MarketIter<InstrumentKey, PublicTrade>
 {
-    fn from((exchange_id, instrument, trade): (ExchangeId, InstrumentId, CoinbaseTrade)) -> Self {
+    fn from((exchange_id, instrument, trade): (ExchangeId, InstrumentKey, CoinbaseTrade)) -> Self {
         Self(vec![Ok(MarketEvent {
-            exchange_time: trade.time,
-            received_time: Utc::now(),
-            exchange: Exchange::from(exchange_id),
+            time_exchange: trade.time,
+            time_received: Utc::now(),
+            exchange: exchange_id,
             instrument,
             kind: PublicTrade {
                 id: trade.id.to_string(),
@@ -117,10 +118,9 @@ mod tests {
                     price: 400.23,
                     amount: 5.23512,
                     side: Side::Sell,
-                    time: DateTime::from_utc(
-                        NaiveDateTime::from_str("2014-11-07T08:19:27.028459").unwrap(),
-                        Utc,
-                    ),
+                    time: NaiveDateTime::from_str("2014-11-07T08:19:27.028459")
+                        .unwrap()
+                        .and_utc(),
                 }),
             },
         ];
@@ -136,7 +136,9 @@ mod tests {
                 }
                 (actual, expected) => {
                     // Test failed
-                    panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                    panic!(
+                        "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                    );
                 }
             }
         }

@@ -1,4 +1,4 @@
-use barter_integration::{error::SocketError, Validator};
+use barter_integration::{Validator, error::SocketError};
 use serde::{Deserialize, Serialize};
 
 /// [`Bitfinex`](super::Bitfinex) platform event detailing the variants expected to be received
@@ -53,7 +53,7 @@ impl Validator for BitfinexPlatformEvent {
             BitfinexPlatformEvent::PlatformStatus(status) => match status.status {
                 Status::Operative => Ok(self),
                 Status::Maintenance => Err(SocketError::Subscribe(format!(
-                    "exchange version: {} with server_id: {} is in maintenance mode",
+                    "execution version: {} with server_id: {} is in maintenance mode",
                     status.api_version, status.server_id,
                 ))),
             },
@@ -272,7 +272,9 @@ mod tests {
                 }
                 (actual, expected) => {
                     // Test failed
-                    panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                    panic!(
+                        "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                    );
                 }
             }
         }
@@ -294,7 +296,7 @@ mod tests {
                     status: Status::Maintenance,
                 }),
                 expected: Err(SocketError::Subscribe(format!(
-                    "exchange version: {} with server_id: {} is in maintenance mode",
+                    "execution version: {} with server_id: {} is in maintenance mode",
                     2, "server_id",
                 ))),
             },
@@ -350,7 +352,9 @@ mod tests {
                 }
                 (actual, expected) => {
                     // Test failed
-                    panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                    panic!(
+                        "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                    );
                 }
             }
         }

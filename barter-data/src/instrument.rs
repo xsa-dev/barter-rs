@@ -1,14 +1,13 @@
-use barter_integration::model::instrument::{kind::InstrumentKind, Instrument};
-use derive_more::{Constructor, Display};
+use barter_instrument::{
+    Keyed,
+    instrument::{
+        Instrument,
+        market_data::{MarketDataInstrument, kind::MarketDataInstrumentKind},
+        name::InstrumentNameExchange,
+    },
+};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-
-/// Concise unique identifier for an instrument. Used to key
-/// [MarketEvents](crate::event::MarketEvent) in a memory efficient way.
-#[derive(
-    Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize, Display,
-)]
-pub struct InstrumentId(pub u64);
 
 /// Instrument related data that defines an associated unique `Id`.
 ///
@@ -19,67 +18,86 @@ pub trait InstrumentData
 where
     Self: Clone + Debug + Send + Sync,
 {
-    type Id: Debug + Clone + Send + Sync;
-    fn id(&self) -> &Self::Id;
-    fn kind(&self) -> InstrumentKind;
+    type Key: Debug + Clone + Eq + Send + Sync;
+    fn key(&self) -> &Self::Key;
+    fn kind(&self) -> &MarketDataInstrumentKind;
 }
 
-#[derive(
-    Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize, Constructor,
-)]
-pub struct KeyedInstrument<Id = InstrumentId> {
-    pub id: Id,
-    pub data: Instrument,
-}
-
-impl<Id> InstrumentData for KeyedInstrument<Id>
+impl<InstrumentKey> InstrumentData for Keyed<InstrumentKey, MarketDataInstrument>
 where
-    Id: Debug + Clone + Send + Sync,
+    InstrumentKey: Debug + Clone + Eq + Send + Sync,
 {
-    type Id = Id;
+    type Key = InstrumentKey;
 
-    fn id(&self) -> &Self::Id {
-        &self.id
+    fn key(&self) -> &Self::Key {
+        &self.key
     }
 
-    fn kind(&self) -> InstrumentKind {
-        self.data.kind
-    }
-}
-
-impl<Id> AsRef<Instrument> for KeyedInstrument<Id> {
-    fn as_ref(&self) -> &Instrument {
-        &self.data
+    fn kind(&self) -> &MarketDataInstrumentKind {
+        &self.value.kind
     }
 }
 
-impl InstrumentData for Instrument {
-    type Id = Self;
+impl InstrumentData for MarketDataInstrument {
+    type Key = Self;
 
-    fn id(&self) -> &Self::Id {
+    fn key(&self) -> &Self::Key {
         self
     }
 
-    fn kind(&self) -> InstrumentKind {
-        self.kind
+    fn kind(&self) -> &MarketDataInstrumentKind {
+        &self.kind
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
-pub struct MarketInstrumentData {
-    pub id: InstrumentId,
-    pub name_exchange: String,
-    pub kind: InstrumentKind,
+pub struct MarketInstrumentData<InstrumentKey> {
+    pub key: InstrumentKey,
+    pub name_exchange: InstrumentNameExchange,
+    pub kind: MarketDataInstrumentKind,
 }
 
-impl InstrumentData for MarketInstrumentData {
-    type Id = InstrumentId;
+impl<InstrumentKey> InstrumentData for MarketInstrumentData<InstrumentKey>
+where
+    InstrumentKey: Debug + Clone + Eq + Send + Sync,
+{
+    type Key = InstrumentKey;
 
-    fn id(&self) -> &Self::Id {
-        &self.id
+    fn key(&self) -> &Self::Key {
+        &self.key
     }
 
-    fn kind(&self) -> InstrumentKind {
-        self.kind
+    fn kind(&self) -> &MarketDataInstrumentKind {
+        &self.kind
+    }
+}
+
+impl<InstrumentKey> std::fmt::Display for MarketInstrumentData<InstrumentKey>
+where
+    InstrumentKey: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}_{}_{}",
+            self.key,
+            self.name_exchange.as_ref(),
+            self.kind
+        )
+    }
+}
+
+impl<ExchangeKey, AssetKey, InstrumentKey>
+    From<&Keyed<InstrumentKey, Instrument<ExchangeKey, AssetKey>>>
+    for MarketInstrumentData<InstrumentKey>
+where
+    InstrumentKey: Clone,
+{
+    fn from(value: &Keyed<InstrumentKey, Instrument<ExchangeKey, AssetKey>>) -> Self {
+        Self {
+            key: value.key.clone(),
+            name_exchange: value.value.name_exchange.clone(),
+            kind: MarketDataInstrumentKind::from(&value.value.kind),
+        }
     }
 }

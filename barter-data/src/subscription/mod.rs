@@ -1,24 +1,18 @@
-use crate::{
-    exchange::{Connector, ExchangeId},
-    instrument::{InstrumentData, KeyedInstrument},
+use crate::{exchange::Connector, instrument::InstrumentData};
+use barter_instrument::{
+    Keyed,
+    asset::name::AssetNameInternal,
+    exchange::ExchangeId,
+    instrument::market_data::{MarketDataInstrument, kind::MarketDataInstrumentKind},
 };
 use barter_integration::{
-    error::SocketError,
-    model::{
-        instrument::{kind::InstrumentKind, symbol::Symbol, Instrument},
-        SubscriptionId,
-    },
-    protocol::websocket::WsMessage,
-    Validator,
+    Validator, error::SocketError, protocol::websocket::WsMessage, subscription::SubscriptionId,
 };
 use derive_more::Display;
+use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
-use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    fmt::{Debug, Display, Formatter},
-    hash::Hash,
-};
+use smol_str::{ToSmolStr, format_smolstr};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 /// OrderBook [`SubscriptionKind`]s and the associated Barter output data models.
 pub mod book;
@@ -32,18 +26,19 @@ pub mod liquidation;
 /// Public trade [`SubscriptionKind`] and the associated Barter output data model.
 pub mod trade;
 
-/// Defines the type of a [`Subscription`], and the output [`Self::Event`] that it yields.
+/// Defines kind of a [`Subscription`], and the output [`Self::Event`] that it yields.
 pub trait SubscriptionKind
 where
     Self: Debug + Clone,
 {
     type Event: Debug;
+    fn as_str(&self) -> &'static str;
 }
 
-/// Barter [`Subscription`] used to subscribe to a [`SubscriptionKind`] for a particular exchange
-/// [`Instrument`].
+/// Barter [`Subscription`] used to subscribe to a [`SubscriptionKind`] for a particular execution
+/// [`MarketDataInstrument`].
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
-pub struct Subscription<Exchange = ExchangeId, Inst = Instrument, Kind = SubKind> {
+pub struct Subscription<Exchange = ExchangeId, Inst = MarketDataInstrument, Kind = SubKind> {
     pub exchange: Exchange,
     #[serde(flatten)]
     pub instrument: Inst,
@@ -51,8 +46,39 @@ pub struct Subscription<Exchange = ExchangeId, Inst = Instrument, Kind = SubKind
     pub kind: Kind,
 }
 
+pub fn display_subscriptions_without_exchange<Exchange, Instrument, Kind>(
+    subscriptions: &[Subscription<Exchange, Instrument, Kind>],
+) -> String
+where
+    Instrument: std::fmt::Display,
+    Kind: std::fmt::Display,
+{
+    subscriptions
+        .iter()
+        .map(
+            |Subscription {
+                 exchange: _,
+                 instrument,
+                 kind,
+             }| { format_smolstr!("({instrument}, {kind})") },
+        )
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+impl<Exchange, Instrument, Kind> std::fmt::Display for Subscription<Exchange, Instrument, Kind>
+where
+    Exchange: std::fmt::Display,
+    Instrument: std::fmt::Display,
+    Kind: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}|{}|{})", self.exchange, self.kind, self.instrument)
+    }
+}
+
 #[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize, Display,
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Display, Deserialize, Serialize,
 )]
 pub enum SubKind {
     PublicTrades,
@@ -63,45 +89,47 @@ pub enum SubKind {
     Candles,
 }
 
-impl<Exchange, Instrument, Kind> Display for Subscription<Exchange, Instrument, Kind>
+impl<Exchange, S, Kind> From<(Exchange, S, S, MarketDataInstrumentKind, Kind)>
+    for Subscription<Exchange, MarketDataInstrument, Kind>
 where
-    Exchange: Display,
-    Instrument: Display,
-    Kind: Display,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}_{}{}", self.exchange, self.kind, self.instrument)
-    }
-}
-
-impl<Exchange, S, Kind> From<(Exchange, S, S, InstrumentKind, Kind)>
-    for Subscription<Exchange, Instrument, Kind>
-where
-    S: Into<Symbol>,
+    S: Into<AssetNameInternal>,
 {
     fn from(
-        (exchange, base, quote, instrument_kind, kind): (Exchange, S, S, InstrumentKind, Kind),
+        (exchange, base, quote, instrument_kind, kind): (
+            Exchange,
+            S,
+            S,
+            MarketDataInstrumentKind,
+            Kind,
+        ),
     ) -> Self {
         Self::new(exchange, (base, quote, instrument_kind), kind)
     }
 }
 
-impl<InstrumentId, Exchange, S, Kind> From<(InstrumentId, Exchange, S, S, InstrumentKind, Kind)>
-    for Subscription<Exchange, KeyedInstrument<InstrumentId>, Kind>
+impl<InstrumentKey, Exchange, S, Kind>
+    From<(
+        InstrumentKey,
+        Exchange,
+        S,
+        S,
+        MarketDataInstrumentKind,
+        Kind,
+    )> for Subscription<Exchange, Keyed<InstrumentKey, MarketDataInstrument>, Kind>
 where
-    S: Into<Symbol>,
+    S: Into<AssetNameInternal>,
 {
     fn from(
         (instrument_id, exchange, base, quote, instrument_kind, kind): (
-            InstrumentId,
+            InstrumentKey,
             Exchange,
             S,
             S,
-            InstrumentKind,
+            MarketDataInstrumentKind,
             Kind,
         ),
     ) -> Self {
-        let instrument = KeyedInstrument::new(instrument_id, (base, quote, instrument_kind).into());
+        let instrument = Keyed::new(instrument_id, (base, quote, instrument_kind).into());
 
         Self::new(exchange, instrument, kind)
     }
@@ -131,26 +159,62 @@ impl<Instrument, Exchange, Kind> Subscription<Exchange, Instrument, Kind> {
     }
 }
 
-impl<Exchange, Kind> Validator for &Subscription<Exchange, Instrument, Kind>
+impl<Exchange, Instrument, Kind> Validator for Subscription<Exchange, Instrument, Kind>
 where
     Exchange: Connector,
+    Instrument: InstrumentData,
 {
     fn validate(self) -> Result<Self, SocketError>
     where
         Self: Sized,
     {
-        // Determine ExchangeId associated with this Subscription
-        let exchange = Exchange::ID;
-
         // Validate the Exchange supports the Subscription InstrumentKind
-        if exchange.supports_instrument_kind(self.instrument.kind) {
+        if exchange_supports_instrument_kind(Exchange::ID, self.instrument.kind()) {
             Ok(self)
         } else {
             Err(SocketError::Unsupported {
-                entity: exchange.as_str(),
-                item: self.instrument.kind.to_string(),
+                entity: Exchange::ID.to_string(),
+                item: self.instrument.kind().to_string(),
             })
         }
+    }
+}
+
+/// Determines whether the [`Connector`] associated with this [`ExchangeId`] supports the
+/// ingestion of market data for the provided [`MarketDataInstrumentKind`].
+#[allow(clippy::match_like_matches_macro)]
+pub fn exchange_supports_instrument_kind(
+    exchange: ExchangeId,
+    instrument_kind: &MarketDataInstrumentKind,
+) -> bool {
+    use barter_instrument::{
+        exchange::ExchangeId::*, instrument::market_data::kind::MarketDataInstrumentKind::*,
+    };
+
+    match (exchange, instrument_kind) {
+        // Spot
+        (
+            BinanceFuturesUsd | Bitmex | BybitPerpetualsUsd | GateioPerpetualsUsd
+            | GateioPerpetualsBtc,
+            Spot,
+        ) => false,
+        (_, Spot) => true,
+
+        // Future
+        (GateioFuturesUsd | GateioFuturesBtc | Okx, Future { .. }) => true,
+        (_, Future { .. }) => false,
+
+        // Perpetual
+        (
+            BinanceFuturesUsd | Bitmex | Okx | BybitPerpetualsUsd | GateioPerpetualsUsd
+            | GateioPerpetualsBtc,
+            Perpetual,
+        ) => true,
+        (_, Perpetual) => false,
+
+        // Option
+        (GateioOptions | Okx, Option { .. }) => true,
+        (_, Option { .. }) => false,
     }
 }
 
@@ -163,46 +227,82 @@ where
         Self: Sized,
     {
         // Validate the Exchange supports the Subscription InstrumentKind
-        if self.exchange.supports(self.instrument.kind(), self.kind) {
+        if exchange_supports_instrument_kind_sub_kind(
+            &self.exchange,
+            self.instrument.kind(),
+            self.kind,
+        ) {
             Ok(self)
         } else {
             Err(SocketError::Unsupported {
-                entity: self.exchange.as_str(),
+                entity: self.exchange.to_string(),
                 item: self.instrument.kind().to_string(),
             })
         }
     }
 }
 
-/// Metadata generated from a collection of Barter [`Subscription`]s, including the exchange
-/// specific subscription payloads that are sent to the exchange.
+/// Determines whether the [`Connector`] associated with this [`ExchangeId`] supports the
+/// ingestion of market data for the provided [`MarketDataInstrumentKind`] and [`SubKind`] combination.
+pub fn exchange_supports_instrument_kind_sub_kind(
+    exchange_id: &ExchangeId,
+    instrument_kind: &MarketDataInstrumentKind,
+    sub_kind: SubKind,
+) -> bool {
+    use ExchangeId::*;
+    use MarketDataInstrumentKind::*;
+    use SubKind::*;
+
+    match (exchange_id, instrument_kind, sub_kind) {
+        (BinanceSpot, Spot, PublicTrades | OrderBooksL1) => true,
+        (BinanceFuturesUsd, Perpetual, PublicTrades | OrderBooksL1 | Liquidations) => true,
+        (Bitfinex, Spot, PublicTrades) => true,
+        (Bitmex, Perpetual, PublicTrades) => true,
+        (BybitSpot, Spot, PublicTrades) => true,
+        (BybitPerpetualsUsd, Perpetual, PublicTrades) => true,
+        (Coinbase, Spot, PublicTrades) => true,
+        (GateioSpot, Spot, PublicTrades) => true,
+        (GateioFuturesUsd, Future { .. }, PublicTrades) => true,
+        (GateioFuturesBtc, Future { .. }, PublicTrades) => true,
+        (GateioPerpetualsUsd, Perpetual, PublicTrades) => true,
+        (GateioPerpetualsBtc, Perpetual, PublicTrades) => true,
+        (GateioOptions, Option { .. }, PublicTrades) => true,
+        (Kraken, Spot, PublicTrades | OrderBooksL1) => true,
+        (Okx, Spot | Future { .. } | Perpetual | Option { .. }, PublicTrades) => true,
+
+        (_, _, _) => false,
+    }
+}
+
+/// Metadata generated from a collection of Barter [`Subscription`]s, including the execution
+/// specific subscription payloads that are sent to the execution.
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub struct SubscriptionMeta<InstrumentId> {
+pub struct SubscriptionMeta<InstrumentKey> {
     /// `HashMap` containing the mapping between a [`SubscriptionId`] and
-    /// it's associated Barter [`Instrument`].
-    pub instrument_map: Map<InstrumentId>,
-    /// Collection of [`WsMessage`]s containing exchange specific subscription payloads to be sent.
-    pub subscriptions: Vec<WsMessage>,
+    /// it's associated Barter [`MarketDataInstrument`].
+    pub instrument_map: Map<InstrumentKey>,
+    /// Collection of [`WsMessage`]s containing execution specific subscription payloads to be sent.
+    pub ws_subscriptions: Vec<WsMessage>,
 }
 
 /// New type`HashMap` that maps a [`SubscriptionId`] to some associated type `T`.
 ///
 /// Used by [`ExchangeTransformer`](crate::transformer::ExchangeTransformer)s to identify the
-/// Barter [`Instrument`] associated with incoming exchange messages.
+/// Barter [`MarketDataInstrument`] associated with incoming execution messages.
 #[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
-pub struct Map<T>(pub HashMap<SubscriptionId, T>);
+pub struct Map<T>(pub FnvHashMap<SubscriptionId, T>);
 
 impl<T> FromIterator<(SubscriptionId, T)> for Map<T> {
     fn from_iter<Iter>(iter: Iter) -> Self
     where
         Iter: IntoIterator<Item = (SubscriptionId, T)>,
     {
-        Self(iter.into_iter().collect::<HashMap<SubscriptionId, T>>())
+        Self(iter.into_iter().collect::<FnvHashMap<SubscriptionId, T>>())
     }
 }
 
 impl<T> Map<T> {
-    /// Find the `InstrumentId` associated with the provided [`SubscriptionId`].
+    /// Find the `InstrumentKey` associated with the provided [`SubscriptionId`].
     pub fn find<SubId>(&self, id: &SubId) -> Result<&T, SocketError>
     where
         SubscriptionId: Borrow<SubId>,
@@ -210,7 +310,7 @@ impl<T> Map<T> {
     {
         self.0
             .get(id)
-            .ok_or_else(|| SocketError::Unidentifiable(SubscriptionId(id.as_ref().to_string())))
+            .ok_or_else(|| SocketError::Unidentifiable(SubscriptionId(id.as_ref().to_smolstr())))
     }
 
     /// Find the mutable reference to `T` associated with the provided [`SubscriptionId`].
@@ -221,7 +321,7 @@ impl<T> Map<T> {
     {
         self.0
             .get_mut(id)
-            .ok_or_else(|| SocketError::Unidentifiable(SubscriptionId(id.as_ref().to_string())))
+            .ok_or_else(|| SocketError::Unidentifiable(SubscriptionId(id.as_ref().to_smolstr())))
     }
 }
 
@@ -235,7 +335,7 @@ mod tests {
             exchange::{coinbase::Coinbase, okx::Okx},
             subscription::trade::PublicTrades,
         };
-        use barter_integration::model::instrument::kind::InstrumentKind;
+        use barter_instrument::instrument::market_data::MarketDataInstrument;
 
         mod de {
             use super::*;
@@ -247,6 +347,7 @@ mod tests {
                 },
                 subscription::{book::OrderBooksL2, trade::PublicTrades},
             };
+            use barter_instrument::instrument::market_data::MarketDataInstrument;
 
             #[test]
             fn test_subscription_okx_spot_public_trades() {
@@ -260,7 +361,10 @@ mod tests {
                 }
                 "#;
 
-                serde_json::from_str::<Subscription<Okx, Instrument, PublicTrades>>(input).unwrap();
+                serde_json::from_str::<Subscription<Okx, MarketDataInstrument, PublicTrades>>(
+                    input,
+                )
+                .unwrap();
             }
 
             #[test]
@@ -275,7 +379,7 @@ mod tests {
                 }
                 "#;
 
-                serde_json::from_str::<Subscription<BinanceSpot, Instrument, PublicTrades>>(input)
+                serde_json::from_str::<Subscription<BinanceSpot, MarketDataInstrument, PublicTrades>>(input)
                     .unwrap();
             }
 
@@ -291,9 +395,9 @@ mod tests {
                 }
                 "#;
 
-                serde_json::from_str::<Subscription<BinanceFuturesUsd, Instrument, OrderBooksL2>>(
-                    input,
-                )
+                serde_json::from_str::<
+                    Subscription<BinanceFuturesUsd, MarketDataInstrument, OrderBooksL2>,
+                >(input)
                 .unwrap();
             }
 
@@ -309,16 +413,19 @@ mod tests {
                 }
                 "#;
 
-                serde_json::from_str::<Subscription<GateioPerpetualsUsd, Instrument, PublicTrades>>(input)
-                    .unwrap();
+                serde_json::from_str::<
+                    Subscription<GateioPerpetualsUsd, MarketDataInstrument, PublicTrades>,
+                >(input)
+                .unwrap();
             }
         }
 
         #[test]
         fn test_validate_bitfinex_public_trades() {
             struct TestCase {
-                input: Subscription<Coinbase, Instrument, PublicTrades>,
-                expected: Result<Subscription<Coinbase, Instrument, PublicTrades>, SocketError>,
+                input: Subscription<Coinbase, MarketDataInstrument, PublicTrades>,
+                expected:
+                    Result<Subscription<Coinbase, MarketDataInstrument, PublicTrades>, SocketError>,
             }
 
             let tests = vec![
@@ -328,14 +435,14 @@ mod tests {
                         Coinbase,
                         "base",
                         "quote",
-                        InstrumentKind::Spot,
+                        MarketDataInstrumentKind::Spot,
                         PublicTrades,
                     )),
                     expected: Ok(Subscription::from((
                         Coinbase,
                         "base",
                         "quote",
-                        InstrumentKind::Spot,
+                        MarketDataInstrumentKind::Spot,
                         PublicTrades,
                     ))),
                 },
@@ -345,11 +452,11 @@ mod tests {
                         Coinbase,
                         "base",
                         "quote",
-                        InstrumentKind::Perpetual,
+                        MarketDataInstrumentKind::Perpetual,
                         PublicTrades,
                     )),
                     expected: Err(SocketError::Unsupported {
-                        entity: "",
+                        entity: "".to_string(),
                         item: "".to_string(),
                     }),
                 },
@@ -357,7 +464,7 @@ mod tests {
 
             for (index, test) in tests.into_iter().enumerate() {
                 let actual = test.input.validate();
-                match (actual, &test.expected) {
+                match (actual, test.expected) {
                     (Ok(actual), Ok(expected)) => {
                         assert_eq!(actual, expected, "TC{} failed", index)
                     }
@@ -366,7 +473,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }
@@ -375,8 +484,9 @@ mod tests {
         #[test]
         fn test_validate_okx_public_trades() {
             struct TestCase {
-                input: Subscription<Okx, Instrument, PublicTrades>,
-                expected: Result<Subscription<Okx, Instrument, PublicTrades>, SocketError>,
+                input: Subscription<Okx, MarketDataInstrument, PublicTrades>,
+                expected:
+                    Result<Subscription<Okx, MarketDataInstrument, PublicTrades>, SocketError>,
             }
 
             let tests = vec![
@@ -386,14 +496,14 @@ mod tests {
                         Okx,
                         "base",
                         "quote",
-                        InstrumentKind::Spot,
+                        MarketDataInstrumentKind::Spot,
                         PublicTrades,
                     )),
                     expected: Ok(Subscription::from((
                         Okx,
                         "base",
                         "quote",
-                        InstrumentKind::Spot,
+                        MarketDataInstrumentKind::Spot,
                         PublicTrades,
                     ))),
                 },
@@ -403,14 +513,14 @@ mod tests {
                         Okx,
                         "base",
                         "quote",
-                        InstrumentKind::Perpetual,
+                        MarketDataInstrumentKind::Perpetual,
                         PublicTrades,
                     )),
                     expected: Ok(Subscription::from((
                         Okx,
                         "base",
                         "quote",
-                        InstrumentKind::Perpetual,
+                        MarketDataInstrumentKind::Perpetual,
                         PublicTrades,
                     ))),
                 },
@@ -418,7 +528,7 @@ mod tests {
 
             for (index, test) in tests.into_iter().enumerate() {
                 let actual = test.input.validate();
-                match (actual, &test.expected) {
+                match (actual, test.expected) {
                     (Ok(actual), Ok(expected)) => {
                         assert_eq!(actual, expected, "TC{} failed", index)
                     }
@@ -427,7 +537,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }
@@ -436,26 +548,30 @@ mod tests {
 
     mod instrument_map {
         use super::*;
-        use barter_integration::model::instrument::{kind::InstrumentKind, Instrument};
+        use barter_instrument::instrument::market_data::MarketDataInstrument;
 
         #[test]
         fn test_find_instrument() {
-            // Initialise SubscriptionId-InstrumentId HashMap
-            let ids = Map(HashMap::from_iter([(
+            // Initialise SubscriptionId-InstrumentKey HashMap
+            let ids = Map(FnvHashMap::from_iter([(
                 SubscriptionId::from("present"),
-                Instrument::from(("base", "quote", InstrumentKind::Spot)),
+                MarketDataInstrument::from(("base", "quote", MarketDataInstrumentKind::Spot)),
             )]));
 
             struct TestCase {
                 input: SubscriptionId,
-                expected: Result<Instrument, SocketError>,
+                expected: Result<MarketDataInstrument, SocketError>,
             }
 
             let cases = vec![
                 TestCase {
                     // TC0: SubscriptionId (channel) is present in the HashMap
                     input: SubscriptionId::from("present"),
-                    expected: Ok(Instrument::from(("base", "quote", InstrumentKind::Spot))),
+                    expected: Ok(MarketDataInstrument::from((
+                        "base",
+                        "quote",
+                        MarketDataInstrumentKind::Spot,
+                    ))),
                 },
                 TestCase {
                     // TC1: SubscriptionId (channel) is not present in the HashMap
@@ -477,7 +593,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }

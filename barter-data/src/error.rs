@@ -1,12 +1,29 @@
-use crate::{exchange::ExchangeId, subscription::SubKind};
-use barter_integration::error::SocketError;
+use crate::subscription::SubKind;
+use barter_instrument::{exchange::ExchangeId, index::error::IndexError};
+use barter_integration::{error::SocketError, subscription::SubscriptionId};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// All errors generated in `barter-data`.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize, Error)]
 pub enum DataError {
+    #[error("failed to index market data Subscriptions: {0}")]
+    Index(#[from] IndexError),
+
+    #[error("failed to initialise reconnecting MarketStream due to empty subscriptions")]
+    SubscriptionsEmpty,
+
+    #[error("unsupported DynamicStreams Subscription SubKind: {0}")]
+    UnsupportedSubKind(SubKind),
+
+    #[error("initial snapshot missing for: {0}")]
+    InitialSnapshotMissing(SubscriptionId),
+
+    #[error("initial snapshot invalid: {0}")]
+    InitialSnapshotInvalid(String),
+
     #[error("SocketError: {0}")]
-    Socket(#[from] SocketError),
+    Socket(String),
 
     #[error("unsupported dynamic Subscription for exchange: {exchange}, kind: {sub_kind}")]
     Unsupported {
@@ -37,6 +54,12 @@ impl DataError {
     }
 }
 
+impl From<SocketError> for DataError {
+    fn from(value: SocketError) -> Self {
+        Self::Socket(value.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,7 +82,7 @@ mod tests {
             },
             TestCase {
                 // TC1: is not terminal w/ DataError::Socket
-                input: DataError::Socket(SocketError::Sink),
+                input: DataError::from(SocketError::Sink),
                 expected: false,
             },
         ];

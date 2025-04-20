@@ -1,15 +1,16 @@
 use self::{channel::GateioChannel, market::GateioMarket, subscription::GateioSubResponse};
 use crate::{
-    exchange::{subscription::ExchangeSub, Connector, ExchangeId, ExchangeServer},
-    subscriber::{validator::WebSocketSubValidator, WebSocketSubscriber},
+    exchange::{Connector, ExchangeServer, subscription::ExchangeSub},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
 };
+use barter_instrument::exchange::ExchangeId;
 use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use serde_json::json;
 use std::{fmt::Debug, marker::PhantomData};
 use url::Url;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific channel used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific channel used for generating [`Connector::requests`].
 pub mod channel;
 
 /// [`ExchangeServer`] and [`StreamSelector`](super::StreamSelector) implementations for
@@ -17,8 +18,8 @@ pub mod channel;
 pub mod spot;
 
 /// [`ExchangeServer`] and [`StreamSelector`](super::StreamSelector) implementations for
-/// [`GateioFutureUsd`](perpetual::GateioFutureUsd) and
-/// [`GateioFutureBtc`](perpetual::GateioFutureBtc).
+/// [`GateioFutureUsd`](future::GateioFuturesUsd) and
+/// [`GateioFutureBtc`](future::GateioFuturesBtc).
 pub mod future;
 
 /// [`ExchangeServer`] and [`StreamSelector`](super::StreamSelector) implementations for
@@ -31,7 +32,7 @@ pub mod perpetual;
 pub mod option;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific market used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific market used for generating [`Connector::requests`].
 pub mod market;
 
 /// Generic [`GateioMessage<T>`](message::GateioMessage) type common to
@@ -45,10 +46,10 @@ pub mod message;
 /// [`GateioPerpetualBtc`](perpetual::GateioPerpetualsBtc).
 pub mod subscription;
 
-/// Generic [`Gateio<Server>`](Gateio) exchange.
+/// Generic [`Gateio<Server>`](Gateio) execution.
 ///
 /// ### Notes
-/// A `Server` [`ExchangeServer`](super::ExchangeServer) implementations exists for
+/// A `Server` [`ExchangeServer`] implementations exists for
 /// [`GateioSpot`](spot::GateioSpot), [`GateioPerpetualUsdt`](perpetual::GateioPerpetualsUsd) and
 /// [`GateioPerpetualBtc`](perpetual::GateioPerpetualsBtc).
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
@@ -75,7 +76,7 @@ where
         exchange_subs
             .into_iter()
             .map(|ExchangeSub { channel, market }| {
-                WsMessage::Text(
+                WsMessage::text(
                     json!({
                         "time": chrono::Utc::now().timestamp_millis(),
                         "channel": channel.as_ref(),
@@ -98,14 +99,12 @@ where
         D: serde::de::Deserializer<'de>,
     {
         let input = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected = Self::ID.as_str();
-
         if input.as_str() == Self::ID.as_str() {
             Ok(Self::default())
         } else {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str(input.as_str()),
-                &expected,
+                &Self::ID.as_str(),
             ))
         }
     }
@@ -119,7 +118,6 @@ where
     where
         S: serde::ser::Serializer,
     {
-        let exchange_id = Self::ID.as_str();
-        serializer.serialize_str(exchange_id)
+        serializer.serialize_str(Self::ID.as_str())
     }
 }

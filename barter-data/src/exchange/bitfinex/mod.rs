@@ -24,27 +24,29 @@ use self::{
     subscription::BitfinexPlatformEvent, validator::BitfinexWebSocketSubValidator,
 };
 use crate::{
-    exchange::{Connector, ExchangeId, ExchangeSub, StreamSelector},
+    ExchangeWsStream, NoInitialSnapshots,
+    exchange::{Connector, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
     subscriber::WebSocketSubscriber,
     subscription::trade::PublicTrades,
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
 use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use barter_macro::{DeExchange, SerExchange};
+use derive_more::Display;
 use serde_json::json;
 use url::Url;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific channel used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific channel used for generating [`Connector::requests`].
 pub mod channel;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific market used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific market used for generating [`Connector::requests`].
 pub mod market;
 
-/// [`BitfinexMessage`](message::BitfinexMessage) type for [`Bitfinex`].
+/// [`BitfinexMessage`] type for [`Bitfinex`].
 pub mod message;
 
 /// [`Subscription`](crate::subscription::Subscription) response types and response
@@ -54,8 +56,7 @@ pub mod subscription;
 /// Public trade types for [`Bitfinex`].
 pub mod trade;
 
-/// Custom [`SubscriptionValidator`](crate::subscriber::validator::SubscriptionValidator)
-/// implementation for [`Bitfinex`].
+/// Custom `SubscriptionValidator` implementation for [`Bitfinex`].
 pub mod validator;
 
 /// [`Bitfinex`] server base url.
@@ -63,11 +64,22 @@ pub mod validator;
 /// See docs: <https://docs.bitfinex.com/docs/ws-general>
 pub const BASE_URL_BITFINEX: &str = "wss://api-pub.bitfinex.com/ws/2";
 
-/// [`Bitfinex`] exchange.
+/// [`Bitfinex`] execution.
 ///
 /// See docs: <https://docs.bitfinex.com/docs/ws-general>
 #[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, DeExchange, SerExchange,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Debug,
+    Default,
+    Display,
+    DeExchange,
+    SerExchange,
 )]
 pub struct Bitfinex;
 
@@ -87,7 +99,7 @@ impl Connector for Bitfinex {
         exchange_subs
             .into_iter()
             .map(|ExchangeSub { channel, market }| {
-                WsMessage::Text(
+                WsMessage::text(
                     json!({
                         "event": "subscribe",
                         "channel": channel.as_ref(),
@@ -104,6 +116,8 @@ impl<Instrument> StreamSelector<Instrument, PublicTrades> for Bitfinex
 where
     Instrument: InstrumentData,
 {
-    type Stream =
-        ExchangeWsStream<StatelessTransformer<Self, Instrument::Id, PublicTrades, BitfinexMessage>>;
+    type SnapFetcher = NoInitialSnapshots;
+    type Stream = ExchangeWsStream<
+        StatelessTransformer<Self, Instrument::Key, PublicTrades, BitfinexMessage>,
+    >;
 }

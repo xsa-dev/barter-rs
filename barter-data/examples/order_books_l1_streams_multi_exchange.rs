@@ -1,14 +1,11 @@
 use barter_data::{
-    exchange::{
-        binance::{futures::BinanceFuturesUsd, spot::BinanceSpot},
-        kraken::Kraken,
-    },
-    streams::Streams,
+    exchange::binance::{futures::BinanceFuturesUsd, spot::BinanceSpot},
+    streams::{Streams, reconnect::stream::ReconnectingStream},
     subscription::book::OrderBooksL1,
 };
-use barter_integration::model::instrument::kind::InstrumentKind;
+use barter_instrument::instrument::market_data::kind::MarketDataInstrumentKind;
 use futures::StreamExt;
-use tracing::info;
+use tracing::{info, warn};
 
 #[rustfmt::skip]
 #[tokio::main]
@@ -20,31 +17,25 @@ async fn main() {
     // '--> each call to StreamBuilder::subscribe() initialises a separate WebSocket connection
     let streams = Streams::<OrderBooksL1>::builder()
         .subscribe([
-            (BinanceSpot::default(), "btc", "usdt", InstrumentKind::Spot, OrderBooksL1),
-            (BinanceSpot::default(), "eth", "usd", InstrumentKind::Spot, OrderBooksL1),
+            (BinanceSpot::default(), "btc", "usdt", MarketDataInstrumentKind::Spot, OrderBooksL1),
+            (BinanceSpot::default(), "eth", "usd", MarketDataInstrumentKind::Spot, OrderBooksL1),
         ])
         .subscribe([
-            (BinanceFuturesUsd::default(), "btc", "usdt", InstrumentKind::Perpetual, OrderBooksL1),
-            (BinanceFuturesUsd::default(), "eth", "usd", InstrumentKind::Perpetual, OrderBooksL1),
-        ])
-        .subscribe([
-            (Kraken, "xbt", "usd", InstrumentKind::Spot, OrderBooksL1),
-            (Kraken, "ada", "usd", InstrumentKind::Spot, OrderBooksL1),
-            (Kraken, "matic", "usd", InstrumentKind::Spot, OrderBooksL1),
-            (Kraken, "dot", "usd", InstrumentKind::Spot, OrderBooksL1),
+            (BinanceFuturesUsd::default(), "btc", "usdt", MarketDataInstrumentKind::Perpetual, OrderBooksL1),
+            (BinanceFuturesUsd::default(), "eth", "usd", MarketDataInstrumentKind::Perpetual, OrderBooksL1),
         ])
         .init()
         .await
         .unwrap();
 
-    // Join all exchange OrderBooksL1 streams into a single tokio_stream::StreamMap
-    // Notes:
-    //  - Use `streams.select(ExchangeId)` to interact with the individual exchange streams!
-    //  - Use `streams.join()` to join all exchange streams into a single mpsc::UnboundedReceiver!
-    let mut joined_stream = streams.join_map().await;
+    // Select and merge every exchange Stream using futures_util::stream::select_all
+    // Note: use `Streams.select(ExchangeId)` to interact with individual exchange streams!
+    let mut joined_stream = streams
+        .select_all()
+        .with_error_handler(|error| warn!(?error, "MarketStream generated error"));
 
-    while let Some((exchange, order_book_l1)) = joined_stream.next().await {
-        info!("Exchange: {exchange}, MarketEvent<OrderBookL1>: {order_book_l1:?}");
+    while let Some(event) = joined_stream.next().await {
+        info!("{event:?}");
     }
 }
 

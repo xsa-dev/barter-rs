@@ -3,30 +3,32 @@ use self::{
     message::KrakenMessage, subscription::KrakenSubResponse, trade::KrakenTrades,
 };
 use crate::{
-    exchange::{Connector, ExchangeId, ExchangeSub, StreamSelector},
+    ExchangeWsStream, NoInitialSnapshots,
+    exchange::{Connector, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{validator::WebSocketSubValidator, WebSocketSubscriber},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::{book::OrderBooksL1, trade::PublicTrades},
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
 use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use barter_macro::{DeExchange, SerExchange};
+use derive_more::Display;
 use serde_json::json;
 use url::Url;
 
-/// Order book types for [`Kraken`]
+/// OrderBook types for [`Kraken`].
 pub mod book;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific channel used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific channel used for generating [`Connector::requests`].
 pub mod channel;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`]  specific market used for generating [`Connector::requests`].
+/// into an execution [`Connector`]  specific market used for generating [`Connector::requests`].
 pub mod market;
 
-/// [`KrakenMessage`](message::KrakenMessage) type for [`Kraken`].
+/// [`KrakenMessage`] type for [`Kraken`].
 pub mod message;
 
 /// [`Subscription`](crate::subscription::Subscription) response type and response
@@ -41,11 +43,22 @@ pub mod trade;
 /// See docs: <https://docs.kraken.com/websockets/#overview>
 pub const BASE_URL_KRAKEN: &str = "wss://ws.kraken.com/";
 
-/// [`Kraken`] exchange.
+/// [`Kraken`] execution.
 ///
 /// See docs: <https://docs.kraken.com/websockets/#overview>
 #[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, DeExchange, SerExchange,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Debug,
+    Default,
+    Display,
+    DeExchange,
+    SerExchange,
 )]
 pub struct Kraken;
 
@@ -65,7 +78,7 @@ impl Connector for Kraken {
         exchange_subs
             .into_iter()
             .map(|ExchangeSub { channel, market }| {
-                WsMessage::Text(
+                WsMessage::text(
                     json!({
                         "event": "subscribe",
                         "pair": [market.as_ref()],
@@ -84,15 +97,17 @@ impl<Instrument> StreamSelector<Instrument, PublicTrades> for Kraken
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream =
-        ExchangeWsStream<StatelessTransformer<Self, Instrument::Id, PublicTrades, KrakenTrades>>;
+        ExchangeWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, KrakenTrades>>;
 }
 
 impl<Instrument> StreamSelector<Instrument, OrderBooksL1> for Kraken
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream = ExchangeWsStream<
-        StatelessTransformer<Self, Instrument::Id, OrderBooksL1, KrakenOrderBookL1>,
+        StatelessTransformer<Self, Instrument::Key, OrderBooksL1, KrakenOrderBookL1>,
     >;
 }

@@ -1,15 +1,14 @@
-use barter_integration::model::{Exchange, Side, SubscriptionId};
+use super::BinanceChannel;
+use crate::{
+    Identifier,
+    event::{MarketEvent, MarketIter},
+    exchange::ExchangeSub,
+    subscription::trade::PublicTrade,
+};
+use barter_instrument::{Side, exchange::ExchangeId};
+use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    event::{MarketEvent, MarketIter},
-    exchange::{ExchangeId, ExchangeSub},
-    subscription::trade::PublicTrade,
-    Identifier,
-};
-
-use super::BinanceChannel;
 
 /// Binance real-time trade message.
 ///
@@ -77,14 +76,14 @@ impl Identifier<Option<SubscriptionId>> for BinanceTrade {
     }
 }
 
-impl<InstrumentId> From<(ExchangeId, InstrumentId, BinanceTrade)>
-    for MarketIter<InstrumentId, PublicTrade>
+impl<InstrumentKey> From<(ExchangeId, InstrumentKey, BinanceTrade)>
+    for MarketIter<InstrumentKey, PublicTrade>
 {
-    fn from((exchange_id, instrument, trade): (ExchangeId, InstrumentId, BinanceTrade)) -> Self {
+    fn from((exchange_id, instrument, trade): (ExchangeId, InstrumentKey, BinanceTrade)) -> Self {
         Self(vec![Ok(MarketEvent {
-            exchange_time: trade.time,
-            received_time: Utc::now(),
-            exchange: Exchange::from(exchange_id),
+            time_exchange: trade.time,
+            time_received: Utc::now(),
+            exchange: exchange_id,
             instrument,
             kind: PublicTrade {
                 id: trade.id.to_string(),
@@ -244,7 +243,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }

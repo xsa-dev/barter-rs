@@ -1,34 +1,39 @@
 use crate::{
-    exchange::bitmex::Bitmex,
-    instrument::{KeyedInstrument, MarketInstrumentData},
+    Identifier, exchange::bitmex::Bitmex, instrument::MarketInstrumentData,
     subscription::Subscription,
-    Identifier,
 };
-use barter_integration::model::instrument::{symbol::Symbol, Instrument};
+use barter_instrument::{
+    Keyed, asset::name::AssetNameInternal, instrument::market_data::MarketDataInstrument,
+};
 use serde::{Deserialize, Serialize};
+use smol_str::{SmolStr, StrExt, format_smolstr};
 
 /// Type that defines how to translate a Barter [`Subscription`] into a [`Bitmex`]
 /// market that can be subscribed to.
 ///
 /// See docs: <https://www.bitmex.com/app/wsAPI>
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
-pub struct BitmexMarket(pub String);
+pub struct BitmexMarket(pub SmolStr);
 
-impl<Kind> Identifier<BitmexMarket> for Subscription<Bitmex, Instrument, Kind> {
+impl<Kind> Identifier<BitmexMarket> for Subscription<Bitmex, MarketDataInstrument, Kind> {
     fn id(&self) -> BitmexMarket {
         bitmex_market(&self.instrument.base, &self.instrument.quote)
     }
 }
 
-impl<Kind> Identifier<BitmexMarket> for Subscription<Bitmex, KeyedInstrument, Kind> {
+impl<InstrumentKey, Kind> Identifier<BitmexMarket>
+    for Subscription<Bitmex, Keyed<InstrumentKey, MarketDataInstrument>, Kind>
+{
     fn id(&self) -> BitmexMarket {
-        bitmex_market(&self.instrument.data.base, &self.instrument.data.quote)
+        bitmex_market(&self.instrument.value.base, &self.instrument.value.quote)
     }
 }
 
-impl<Kind> Identifier<BitmexMarket> for Subscription<Bitmex, MarketInstrumentData, Kind> {
+impl<InstrumentKey, Kind> Identifier<BitmexMarket>
+    for Subscription<Bitmex, MarketInstrumentData<InstrumentKey>, Kind>
+{
     fn id(&self) -> BitmexMarket {
-        BitmexMarket(self.instrument.name_exchange.clone())
+        BitmexMarket(self.instrument.name_exchange.name().clone())
     }
 }
 
@@ -38,8 +43,8 @@ impl AsRef<str> for BitmexMarket {
     }
 }
 
-fn bitmex_market(base: &Symbol, quote: &Symbol) -> BitmexMarket {
+fn bitmex_market(base: &AssetNameInternal, quote: &AssetNameInternal) -> BitmexMarket {
     // Notes:
     // - Must be uppercase since Bitmex sends message with uppercase MARKET (eg/ XBTUSD).
-    BitmexMarket(format!("{base}{quote}").to_uppercase())
+    BitmexMarket(format_smolstr!("{base}{quote}").to_uppercase_smolstr())
 }

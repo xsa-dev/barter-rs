@@ -1,25 +1,25 @@
 use super::super::KrakenMessage;
 use crate::{
-    event::{MarketEvent, MarketIter},
-    exchange::{kraken::channel::KrakenChannel, subscription::ExchangeSub, ExchangeId},
-    subscription::book::{Level, OrderBookL1},
     Identifier,
+    books::Level,
+    event::{MarketEvent, MarketIter},
+    exchange::{kraken::channel::KrakenChannel, subscription::ExchangeSub},
+    subscription::book::OrderBookL1,
 };
-use barter_integration::{
-    de::extract_next,
-    model::{Exchange, SubscriptionId},
-};
+use barter_instrument::exchange::ExchangeId;
+use barter_integration::{de::extract_next, subscription::SubscriptionId};
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 /// Terse type alias for an [`Kraken`](super::super::Kraken) real-time OrderBook Level1
-/// (top of book) WebSocket message.
+/// (top of books) WebSocket message.
 pub type KrakenOrderBookL1 = KrakenMessage<KrakenOrderBookL1Inner>;
 
-/// [`Kraken`](super::super::Kraken) real-time OrderBook Level1 (top of book) data and the
+/// [`Kraken`](super::super::Kraken) real-time OrderBook Level1 (top of books) data and the
 /// associated [`SubscriptionId`].
 ///
-/// See [`KrakenMessage`](super::super::message::KrakenMessage) for full raw payload examples.
+/// See [`KrakenMessage`] for full raw payload examples.
 ///
 /// See docs: <https://docs.kraken.com/websockets/#message-spread>
 #[derive(Clone, PartialEq, PartialOrd, Debug, Serialize)]
@@ -30,21 +30,21 @@ pub struct KrakenOrderBookL1Inner {
 
 /// [`Kraken`](super::super::Kraken) best bid and ask.
 ///
-/// See [`KrakenMessage`](super::super::message::KrakenMessage) for full raw payload examples.
+/// See [`KrakenMessage`] for full raw payload examples.
 ///
 /// See docs: <https://docs.kraken.com/websockets/#message-spread>
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Deserialize, Serialize)]
 pub struct KrakenSpread {
-    #[serde(deserialize_with = "barter_integration::de::de_str")]
-    pub best_bid_price: f64,
-    #[serde(deserialize_with = "barter_integration::de::de_str")]
-    pub best_ask_price: f64,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub best_bid_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub best_ask_price: Decimal,
     #[serde(deserialize_with = "barter_integration::de::de_str_f64_epoch_s_as_datetime_utc")]
     pub time: DateTime<Utc>,
-    #[serde(deserialize_with = "barter_integration::de::de_str")]
-    pub best_bid_amount: f64,
-    #[serde(deserialize_with = "barter_integration::de::de_str")]
-    pub best_ask_amount: f64,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub best_bid_amount: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub best_ask_amount: Decimal,
 }
 
 impl Identifier<Option<SubscriptionId>> for KrakenOrderBookL1Inner {
@@ -53,24 +53,44 @@ impl Identifier<Option<SubscriptionId>> for KrakenOrderBookL1Inner {
     }
 }
 
-impl<InstrumentId> From<(ExchangeId, InstrumentId, KrakenOrderBookL1)>
-    for MarketIter<InstrumentId, OrderBookL1>
+impl<InstrumentKey> From<(ExchangeId, InstrumentKey, KrakenOrderBookL1)>
+    for MarketIter<InstrumentKey, OrderBookL1>
 {
     fn from(
-        (exchange_id, instrument, book): (ExchangeId, InstrumentId, KrakenOrderBookL1),
+        (exchange_id, instrument, book): (ExchangeId, InstrumentKey, KrakenOrderBookL1),
     ) -> Self {
         match book {
-            KrakenOrderBookL1::Data(book) => Self(vec![Ok(MarketEvent {
-                exchange_time: book.spread.time,
-                received_time: Utc::now(),
-                exchange: Exchange::from(exchange_id),
-                instrument,
-                kind: OrderBookL1 {
-                    last_update_time: book.spread.time,
-                    best_bid: Level::new(book.spread.best_bid_price, book.spread.best_bid_amount),
-                    best_ask: Level::new(book.spread.best_ask_price, book.spread.best_ask_amount),
-                },
-            })]),
+            KrakenOrderBookL1::Data(book) => {
+                let best_ask = if book.spread.best_ask_price.is_zero() {
+                    None
+                } else {
+                    Some(Level::new(
+                        book.spread.best_ask_price,
+                        book.spread.best_ask_amount,
+                    ))
+                };
+
+                let best_bid = if book.spread.best_bid_price.is_zero() {
+                    None
+                } else {
+                    Some(Level::new(
+                        book.spread.best_bid_price,
+                        book.spread.best_bid_amount,
+                    ))
+                };
+
+                Self(vec![Ok(MarketEvent {
+                    time_exchange: book.spread.time,
+                    time_received: Utc::now(),
+                    exchange: exchange_id,
+                    instrument,
+                    kind: OrderBookL1 {
+                        last_update_time: book.spread.time,
+                        best_bid,
+                        best_ask,
+                    },
+                })])
+            }
             KrakenOrderBookL1::Event(_) => MarketIter(vec![]),
         }
     }
@@ -137,8 +157,9 @@ mod tests {
     mod de {
         use super::*;
         use barter_integration::{
-            de::datetime_utc_from_epoch_duration, error::SocketError, model::SubscriptionId,
+            de::datetime_utc_from_epoch_duration, error::SocketError, subscription::SubscriptionId,
         };
+        use rust_decimal_macros::dec;
 
         #[test]
         fn test_kraken_message_order_book_l1() {
@@ -166,13 +187,13 @@ mod tests {
                 expected: Ok(KrakenOrderBookL1::Data(KrakenOrderBookL1Inner {
                     subscription_id: SubscriptionId::from("spread|XBT/USD"),
                     spread: KrakenSpread {
-                        best_bid_price: 5698.4,
-                        best_bid_amount: 1.01234567,
+                        best_bid_price: dec!(5698.40000),
+                        best_bid_amount: dec!(1.01234567),
                         time: datetime_utc_from_epoch_duration(std::time::Duration::from_secs_f64(
                             1542057299.545897,
                         )),
-                        best_ask_price: 5700.0,
-                        best_ask_amount: 0.98765432,
+                        best_ask_price: dec!(5700.00000),
+                        best_ask_amount: dec!(0.98765432),
                     },
                 })),
             }];
@@ -188,7 +209,9 @@ mod tests {
                     }
                     (actual, expected) => {
                         // Test failed
-                        panic!("TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n");
+                        panic!(
+                            "TC{index} failed because actual != expected. \nActual: {actual:?}\nExpected: {expected:?}\n"
+                        );
                     }
                 }
             }

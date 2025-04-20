@@ -1,25 +1,21 @@
 use super::super::message::GateioMessage;
 use crate::{
-    event::{MarketEvent, MarketIter},
-    exchange::{ExchangeId, ExchangeSub},
-    subscription::trade::PublicTrade,
     Identifier,
+    event::{MarketEvent, MarketIter},
+    exchange::ExchangeSub,
+    subscription::trade::PublicTrade,
 };
-use barter_integration::model::{Exchange, Side, SubscriptionId};
+use barter_instrument::{Side, exchange::ExchangeId};
+use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Terse type alias for a
-/// [`GateioFuturesUsdt`](super::super::futures::GateioFuturesUsdt),
-/// [`GateioFuturesBtc`](super::super::futures::GateioFuturesBtc),
-/// [`GateioPerpetualUsdt`](super::GateioPerpetualsUsd) and
-/// [`GateioPerpetualBtc`](super::GateioPerpetualsBtc) real-time trades WebSocket message.
+/// Terse type alias for a `GateioFuturesUsdt`, `GateioFuturesBtc`, `GateioPerpetualUsdt` and
+/// `GateioPerpetualBtc` real-time trades WebSocket message.
 pub type GateioFuturesTrades = GateioMessage<Vec<GateioFuturesTradeInner>>;
 
-/// [`GateioFuturesUsdt`](super::super::futures::GateioFuturesUsdt),
-/// [`GateioFuturesBtc`](super::super::futures::GateioFuturesBtc),
-/// [`GateioPerpetualUsdt`](super::GateioPerpetualsUsd) and
-/// [`GateioPerpetualBtc`](super::GateioPerpetualsBtc) real-time trade WebSocket message.
+/// `GateioFuturesUsdt`, `GateioFuturesBtc`, `GateioPerpetualUsdt` and `GateioPerpetualBtc`
+/// real-time trade WebSocket message.
 ///
 /// ### Raw Payload Examples
 /// #### Future Sell Trade
@@ -71,20 +67,20 @@ impl Identifier<Option<SubscriptionId>> for GateioFuturesTrades {
     }
 }
 
-impl<InstrumentId: Clone> From<(ExchangeId, InstrumentId, GateioFuturesTrades)>
-    for MarketIter<InstrumentId, PublicTrade>
+impl<InstrumentKey: Clone> From<(ExchangeId, InstrumentKey, GateioFuturesTrades)>
+    for MarketIter<InstrumentKey, PublicTrade>
 {
     fn from(
-        (exchange_id, instrument, trades): (ExchangeId, InstrumentId, GateioFuturesTrades),
+        (exchange, instrument, trades): (ExchangeId, InstrumentKey, GateioFuturesTrades),
     ) -> Self {
         trades
             .data
             .into_iter()
             .map(|trade| {
                 Ok(MarketEvent {
-                    exchange_time: trade.time,
-                    received_time: Utc::now(),
-                    exchange: Exchange::from(exchange_id),
+                    time_exchange: trade.time,
+                    time_received: Utc::now(),
+                    exchange,
                     instrument: instrument.clone(),
                     kind: PublicTrade {
                         id: trade.id.to_string(),

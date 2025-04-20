@@ -1,16 +1,21 @@
-use self::{l2::BinanceFuturesBookUpdater, liquidation::BinanceLiquidation};
+use self::liquidation::BinanceLiquidation;
 use super::{Binance, ExchangeServer};
 use crate::{
-    exchange::{ExchangeId, StreamSelector},
+    ExchangeWsStream, NoInitialSnapshots,
+    exchange::{
+        StreamSelector,
+        binance::futures::l2::{
+            BinanceFuturesUsdOrderBooksL2SnapshotFetcher, BinanceFuturesUsdOrderBooksL2Transformer,
+        },
+    },
     instrument::InstrumentData,
     subscription::{book::OrderBooksL2, liquidation::Liquidations},
-    transformer::{book::MultiBookTransformer, stateless::StatelessTransformer},
-    ExchangeWsStream,
+    transformer::stateless::StatelessTransformer,
 };
-use barter_integration::model::instrument::Instrument;
+use barter_instrument::exchange::ExchangeId;
+use std::fmt::{Display, Formatter};
 
-/// Level 2 OrderBook types (top of book) and perpetual
-/// [`OrderBookUpdater`](crate::transformer::book::OrderBookUpdater) implementation.
+/// Level 2 OrderBook types.
 pub mod l2;
 
 /// Liquidation types.
@@ -21,7 +26,7 @@ pub mod liquidation;
 /// See docs: <https://binance-docs.github.io/apidocs/futures/en/#websocket-market-streams>
 pub const WEBSOCKET_BASE_URL_BINANCE_FUTURES_USD: &str = "wss://fstream.binance.com/ws";
 
-/// [`Binance`] perpetual usd exchange.
+/// [`Binance`] perpetual usd execution.
 pub type BinanceFuturesUsd = Binance<BinanceServerFuturesUsd>;
 
 /// [`Binance`] perpetual usd [`ExchangeServer`].
@@ -36,17 +41,26 @@ impl ExchangeServer for BinanceServerFuturesUsd {
     }
 }
 
-impl StreamSelector<Instrument, OrderBooksL2> for BinanceFuturesUsd {
-    type Stream = ExchangeWsStream<
-        MultiBookTransformer<Self, Instrument, OrderBooksL2, BinanceFuturesBookUpdater>,
-    >;
+impl<Instrument> StreamSelector<Instrument, OrderBooksL2> for BinanceFuturesUsd
+where
+    Instrument: InstrumentData,
+{
+    type SnapFetcher = BinanceFuturesUsdOrderBooksL2SnapshotFetcher;
+    type Stream = ExchangeWsStream<BinanceFuturesUsdOrderBooksL2Transformer<Instrument::Key>>;
 }
 
 impl<Instrument> StreamSelector<Instrument, Liquidations> for BinanceFuturesUsd
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream = ExchangeWsStream<
-        StatelessTransformer<Self, Instrument::Id, Liquidations, BinanceLiquidation>,
+        StatelessTransformer<Self, Instrument::Key, Liquidations, BinanceLiquidation>,
     >;
+}
+
+impl Display for BinanceFuturesUsd {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BinanceFuturesUsd")
+    }
 }

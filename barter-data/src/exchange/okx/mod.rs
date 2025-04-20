@@ -2,25 +2,27 @@ use self::{
     channel::OkxChannel, market::OkxMarket, subscription::OkxSubResponse, trade::OkxTrades,
 };
 use crate::{
-    exchange::{Connector, ExchangeId, ExchangeSub, PingInterval, StreamSelector},
+    ExchangeWsStream, NoInitialSnapshots,
+    exchange::{Connector, ExchangeSub, PingInterval, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{validator::WebSocketSubValidator, WebSocketSubscriber},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::trade::PublicTrades,
     transformer::stateless::StatelessTransformer,
-    ExchangeWsStream,
 };
+use barter_instrument::exchange::ExchangeId;
 use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use barter_macro::{DeExchange, SerExchange};
+use derive_more::Display;
 use serde_json::json;
 use std::time::Duration;
 use url::Url;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific channel used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific channel used for generating [`Connector::requests`].
 pub mod channel;
 
 /// Defines the type that translates a Barter [`Subscription`](crate::subscription::Subscription)
-/// into an exchange [`Connector`] specific market used for generating [`Connector::requests`].
+/// into an execution [`Connector`] specific market used for generating [`Connector::requests`].
 pub mod market;
 
 /// [`Subscription`](crate::subscription::Subscription) response type and response
@@ -40,11 +42,22 @@ pub const BASE_URL_OKX: &str = "wss://wsaws.okx.com:8443/ws/v5/public";
 /// See docs: <https://www.okx.com/docs-v5/en/#websocket-api-connect>
 pub const PING_INTERVAL_OKX: Duration = Duration::from_secs(29);
 
-/// [`Okx`] exchange.
+/// [`Okx`] execution.
 ///
 /// See docs: <https://www.okx.com/docs-v5/en/#websocket-api>
 #[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, DeExchange, SerExchange,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Debug,
+    Default,
+    Display,
+    DeExchange,
+    SerExchange,
 )]
 pub struct Okx;
 
@@ -68,7 +81,7 @@ impl Connector for Okx {
     }
 
     fn requests(exchange_subs: Vec<ExchangeSub<Self::Channel, Self::Market>>) -> Vec<WsMessage> {
-        vec![WsMessage::Text(
+        vec![WsMessage::text(
             json!({
                 "op": "subscribe",
                 "args": &exchange_subs,
@@ -82,6 +95,7 @@ impl<Instrument> StreamSelector<Instrument, PublicTrades> for Okx
 where
     Instrument: InstrumentData,
 {
+    type SnapFetcher = NoInitialSnapshots;
     type Stream =
-        ExchangeWsStream<StatelessTransformer<Self, Instrument::Id, PublicTrades, OkxTrades>>;
+        ExchangeWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, OkxTrades>>;
 }
